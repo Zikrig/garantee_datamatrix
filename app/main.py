@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -1689,10 +1689,6 @@ async def main() -> None:
     dp.message.register(forget_me_handler, Command("forget_me"))
     dp.message.register(comment_handler, Command("comment"))
 
-    # Important: Forwarding handlers should be early
-    dp.message.register(admin_group_reply_handler, F.chat.type.in_({"supergroup", "group"}))
-    dp.message.register(attach_clarification, F.chat.type == "private")
-
     dp.callback_query.register(status_callback_handler, F.data.startswith("status:"))
     dp.callback_query.register(admin_list_claims_handler, F.data.startswith("admin:list_claims:"))
     dp.callback_query.register(admin_kb_menu_handler, F.data == "admin:kb_menu")
@@ -1746,6 +1742,10 @@ async def main() -> None:
     dp.message.register(warranty_name_handler, WarrantyStates.name)
 
     dp.message.register(unexpected_state_message_handler)
+
+    # Forwarding handlers (only if no state is active)
+    dp.message.register(admin_group_reply_handler, F.chat.type.in_({"supergroup", "group"}))
+    dp.message.register(attach_clarification, F.chat.type == "private", StateFilter(None))
 
     # Move generic handlers down
     dp.message.register(generic_photo_handler, F.photo)
