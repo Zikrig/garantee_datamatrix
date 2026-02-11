@@ -46,6 +46,7 @@ class ClaimStates(StatesGroup):
     purchase_type = State()
     purchase_wb = State()
     purchase_cz_photo = State()
+    purchase_cz_text = State()
     files = State()
     contact_name = State()
     contact_phone = State()
@@ -103,6 +104,7 @@ def save_kb(data: dict):
 
 class WarrantyStates(StatesGroup):
     cz_photo = State()
+    cz_text = State()
     receipt_pdf = State()
     sku = State()
     name = State()
@@ -117,16 +119,19 @@ def main_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=MAIN_MENU[1], callback_data="menu:claim"),
         ],
         [
-            InlineKeyboardButton(text=MAIN_MENU[2], callback_data="menu:claims"),
-            InlineKeyboardButton(text=MAIN_MENU[3], callback_data="menu:shop"),
+            InlineKeyboardButton(text=MAIN_MENU[2], callback_data="menu:my_items"),
+            InlineKeyboardButton(text=MAIN_MENU[3], callback_data="menu:claims"),
         ],
         [
-            InlineKeyboardButton(text=MAIN_MENU[4], callback_data="menu:care"),
-            InlineKeyboardButton(text=MAIN_MENU[5], callback_data="menu:useful"),
+            InlineKeyboardButton(text=MAIN_MENU[4], callback_data="menu:shop"),
+            InlineKeyboardButton(text=MAIN_MENU[5], callback_data="menu:care"),
         ],
         [
-            InlineKeyboardButton(text=MAIN_MENU[6], callback_data="menu:trust"),
-            InlineKeyboardButton(text=MAIN_MENU[7], callback_data="menu:faq"),
+            InlineKeyboardButton(text=MAIN_MENU[6], callback_data="menu:useful"),
+            InlineKeyboardButton(text=MAIN_MENU[7], callback_data="menu:trust"),
+        ],
+        [
+            InlineKeyboardButton(text=MAIN_MENU[8], callback_data="menu:faq"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -166,22 +171,25 @@ def skip_kb() -> InlineKeyboardMarkup:
     )
 
 
-def claim_status_kb(claim_id: str, status: str = "Новая", group_link: str | None = None) -> InlineKeyboardMarkup:
-    # Toggle logic for "Нужны уточнения" or "Решено"
-    # Removed "В работу" as requested
+def claim_status_kb(claim_id: str, status: str = "Новая", is_group: bool = True, group_link: str | None = None) -> InlineKeyboardMarkup:
+    # Logic for status buttons
     rows = []
     
-    btn_clarify = InlineKeyboardButton(
-        text="❓ Нужны уточнения" if status != "Нужны уточнения" else "✅ Нужны уточнения (активно)",
-        callback_data=f"status:{claim_id}:Нужны уточнения"
-    )
-    btn_resolved = InlineKeyboardButton(
-        text="🟢 Решено" if status != "Решено" else "✅ Решено (активно)",
-        callback_data=f"status:{claim_id}:Решено"
-    )
-    
-    rows.append([btn_clarify])
-    rows.append([btn_resolved])
+    if is_group:
+        if status == "Новая":
+            rows.append([InlineKeyboardButton(text="🛠 В работу", callback_data=f"status:{claim_id}:В работе")])
+        
+        btn_clarify = InlineKeyboardButton(
+            text="❓ Нужны уточнения" if status != "Нужны уточнения" else "✅ Нужны уточнения (активно)",
+            callback_data=f"status:{claim_id}:Нужны уточнения"
+        )
+        btn_resolved = InlineKeyboardButton(
+            text="🟢 Решено" if status != "Решено" else "✅ Решено (активно)",
+            callback_data=f"status:{claim_id}:Решено"
+        )
+        
+        rows.append([btn_clarify])
+        rows.append([btn_resolved])
     
     if group_link:
         rows.append([InlineKeyboardButton(text="➡️ Перейти к заявке", url=group_link)])
@@ -322,21 +330,21 @@ async def send_admin_claim(
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
         # Fallback to private messages if group not set
-        if not ADMIN_CHAT_IDS:
-            return
+    if not ADMIN_CHAT_IDS:
+        return
 
-        text = (
-            "🛠 Новая заявка\n"
-            f"claim_id: {claim['id']}\n"
-            f"дата: {claim['created_at']}\n"
-            f"tg: {claim['tg_id']} @{username or '-'}\n"
-            f"имя: {name or '-'}\n"
-            f"телефон: {phone or '-'}\n"
-            f"идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
+    text = (
+        "🛠 Новая заявка\n"
+        f"claim_id: {claim['id']}\n"
+        f"дата: {claim['created_at']}\n"
+        f"tg: {claim['tg_id']} @{username or '-'}\n"
+        f"имя: {name or '-'}\n"
+        f"телефон: {phone or '-'}\n"
+        f"идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
             f"{products_info}\n"
-            f"текст: {claim['description']}\n"
-        )
-        for admin_id in ADMIN_CHAT_IDS:
+        f"текст: {claim['description']}\n"
+    )
+    for admin_id in ADMIN_CHAT_IDS:
             try:
                 await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"]), parse_mode="Markdown")
             except Exception as e:
@@ -344,16 +352,16 @@ async def send_admin_claim(
         # ... rest of files ...
 
         if files:
-            for index, item in enumerate(files):
-                caption = f"Файлы по заявке {claim['id']}" if index == 0 else None
-                for admin_id in ADMIN_CHAT_IDS:
+    for index, item in enumerate(files):
+        caption = f"Файлы по заявке {claim['id']}" if index == 0 else None
+        for admin_id in ADMIN_CHAT_IDS:
                     try:
-                        if item["file_type"] == "photo":
-                            await bot.send_photo(admin_id, item["file_id"], caption=caption)
-                        elif item["file_type"] == "video":
-                            await bot.send_video(admin_id, item["file_id"], caption=caption)
-                        else:
-                            await bot.send_document(admin_id, item["file_id"], caption=caption)
+            if item["file_type"] == "photo":
+                await bot.send_photo(admin_id, item["file_id"], caption=caption)
+            elif item["file_type"] == "video":
+                await bot.send_video(admin_id, item["file_id"], caption=caption)
+            else:
+                await bot.send_document(admin_id, item["file_id"], caption=caption)
                     except Exception as e:
                         logging.error(f"Failed to send file to admin {admin_id}: {e}")
         return
@@ -377,9 +385,15 @@ async def send_admin_claim(
         group_id, 
         text, 
         message_thread_id=thread_id, 
-        reply_markup=claim_status_kb(claim["id"]),
+        reply_markup=claim_status_kb(claim["id"], is_group=True),
         parse_mode="Markdown"
     )
+    
+    # Pin message in group topic
+    try:
+        await bot.pin_chat_message(group_id, group_msg.message_id)
+    except Exception as e:
+        logging.warning(f"Failed to pin message in group: {e}")
     
     # Store message_id for linking
     await db.update_claim_group_message(claim["id"], group_msg.message_id)
@@ -397,7 +411,7 @@ async def send_admin_claim(
     for admin_id in ADMIN_CHAT_IDS:
         try:
             # We don't send full text to private if group is available, just a link/notification
-            await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], group_link=msg_link), parse_mode="Markdown")
+            await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="Markdown")
         except Exception as e:
             logging.error(f"Failed to send notification to admin {admin_id}: {e}")
 
@@ -415,10 +429,6 @@ async def send_admin_claim(
 
 
 async def attach_clarification(message: Message, bot: Bot, state: FSMContext) -> bool:
-    current_state = await state.get_state()
-    if current_state:
-        return False
-    
     if message.text and message.text.startswith("/"):
         return False
         
@@ -447,37 +457,37 @@ async def attach_clarification(message: Message, bot: Bot, state: FSMContext) ->
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
         # Old logic fallback: private messages to admins
-        text = message.text or ""
-        if text:
-            await db.add_claim_note(claim["id"], "user", text)
+    text = message.text or ""
+    if text:
+        await db.add_claim_note(claim["id"], "user", text)
 
-        if message.photo:
-            await db.add_claim_file(claim["id"], message.photo[-1].file_id, "photo")
-        elif message.video:
-            await db.add_claim_file(claim["id"], message.video.file_id, "video")
-        elif message.document:
-            await db.add_claim_file(claim["id"], message.document.file_id, "document")
+    if message.photo:
+        await db.add_claim_file(claim["id"], message.photo[-1].file_id, "photo")
+    elif message.video:
+        await db.add_claim_file(claim["id"], message.video.file_id, "video")
+    elif message.document:
+        await db.add_claim_file(claim["id"], message.document.file_id, "document")
 
-        if ADMIN_CHAT_IDS:
-            for admin_id in ADMIN_CHAT_IDS:
+    if ADMIN_CHAT_IDS:
+        for admin_id in ADMIN_CHAT_IDS:
                 try:
-                    await bot.send_message(
-                        admin_id,
-                        f"Получены уточнения по заявке {claim['id']} от пользователя {message.from_user.id}",
-                    )
-                    if text:
-                        await bot.send_message(admin_id, f"Текст уточнения: {text}")
-                    if message.photo:
-                        await bot.send_photo(admin_id, message.photo[-1].file_id)
-                    elif message.video:
-                        await bot.send_video(admin_id, message.video.file_id)
-                    elif message.document:
-                        await bot.send_document(admin_id, message.document.file_id)
+            await bot.send_message(
+                admin_id,
+                f"Получены уточнения по заявке {claim['id']} от пользователя {message.from_user.id}",
+            )
+            if text:
+                await bot.send_message(admin_id, f"Текст уточнения: {text}")
+            if message.photo:
+                await bot.send_photo(admin_id, message.photo[-1].file_id)
+            elif message.video:
+                await bot.send_video(admin_id, message.video.file_id)
+            elif message.document:
+                await bot.send_document(admin_id, message.document.file_id)
                 except Exception as e:
                     logging.error(f"Failed to send clarification to admin {admin_id}: {e}")
 
-        await message.answer("Спасибо! Уточнения добавлены к заявке.", reply_markup=main_menu_kb())
-        return True
+    await message.answer("Спасибо! Уточнения добавлены к заявке.", reply_markup=main_menu_kb())
+    return True
 
     # Supergroup logic: forward to the thread
     group_id = int(group_id_str)
@@ -885,6 +895,44 @@ async def cancel_callback_handler(callback: CallbackQuery, state: FSMContext) ->
     await callback.message.answer("Действие отменено.", reply_markup=main_menu_kb())
 
 
+async def show_user_warranties(message: Message, user_id: int) -> None:
+    warranties = await db.get_warranties(user_id)
+    if not warranties:
+        await message.answer(
+            "У вас пока нет зарегистрированных изделий.",
+            reply_markup=main_menu_kb()
+        )
+        return
+
+    text = "📦 **Ваши изделия с активной гарантией:**\n\n"
+    for w in warranties:
+        end_date = w['end_date']
+        try:
+            end_date = dt.date.fromisoformat(end_date).strftime("%d.%m.%Y")
+        except:
+            pass
+        sku = w.get('sku') or 'Изделие'
+        text += f"🔹 **{sku}**\n🗓 Гарантия до: {end_date}\n🔢 Код: `{w['cz_code'][:15]}...`\n\n"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Активировать еще", callback_data="warranty:new")],
+        [InlineKeyboardButton(text="🔙 В меню", callback_data="cancel")]
+    ])
+    
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+
+
+async def my_items_handler(message: Message) -> None:
+    await upsert_from_user(message.from_user)
+    await show_user_warranties(message, message.from_user.id)
+
+
+async def my_items_callback_handler(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await upsert_from_user(callback.from_user)
+    await show_user_warranties(callback.message, callback.from_user.id)
+
+
 async def claims_menu_handler(message: Message) -> None:
     claims = await db.list_claims_by_user(message.from_user.id, limit=5)
     if not claims:
@@ -1031,8 +1079,20 @@ async def status_callback_handler(callback: CallbackQuery) -> None:
 
     await db.update_claim_status(claim_id, status)
     
+    # Check if this is a group message or private message
+    group_id_str = await db.get_setting("admin_group_id")
+    is_group_msg = str(callback.message.chat.id) == group_id_str
+    
     # Update markup to reflect new state
-    await callback.message.edit_reply_markup(reply_markup=claim_status_kb(claim_id, status))
+    group_link = None
+    if not is_group_msg and group_id_str:
+        clean_group_id = group_id_str.replace("-100", "")
+        if claim.get("group_message_id"):
+            group_link = f"https://t.me/c/{clean_group_id}/{claim['group_message_id']}"
+
+    await callback.message.edit_reply_markup(
+        reply_markup=claim_status_kb(claim_id, status, is_group=is_group_msg, group_link=group_link)
+    )
     await callback.answer(f"Статус обновлен: {status}")
 
     if status == "Нужны уточнения":
@@ -1101,8 +1161,8 @@ async def claim_description_handler(message: Message, state: FSMContext) -> None
     warranties = await db.get_warranties(message.from_user.id)
     if not warranties:
         # Fallback if somehow they got here without warranties
-        await state.set_state(ClaimStates.purchase_type)
-        await message.answer("Выберите идентификатор покупки:", reply_markup=purchase_type_kb())
+    await state.set_state(ClaimStates.purchase_type)
+    await message.answer("Выберите идентификатор покупки:", reply_markup=purchase_type_kb())
         return
 
     if len(warranties) == 1:
@@ -1163,9 +1223,15 @@ async def claim_purchase_type_handler(callback: CallbackQuery, state: FSMContext
     if callback.data == "purchase:cz":
         await state.update_data(purchase_type="ЧЗ")
         await state.set_state(ClaimStates.purchase_cz_photo)
+        
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+        ])
+        
         await callback.message.answer(
             "Отправьте фото кода Честный знак.",
-            reply_markup=cancel_kb(),
+            reply_markup=kb,
         )
         return
 
@@ -1187,40 +1253,82 @@ async def claim_purchase_wb_handler(message: Message, state: FSMContext) -> None
     )
 
 
+async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(ClaimStates.purchase_cz_text)
+    await callback.message.answer(
+        "Введите код Честный знак вручную.\n\n"
+        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
+        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+        reply_markup=cancel_kb()
+    )
+
+
 async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None:
     photo = message.photo[-1] if message.photo else None
     document = message.document if message.document else None
+    
+    data = await state.get_data()
+    failures = data.get("cz_failures_claim", 0)
+
     if not photo and not document:
-        await message.answer("Нужна фотография Честного знака.", reply_markup=cancel_kb())
+        await message.answer("Нужна фотография Честного знака или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+        ]))
         return
 
     file_id = photo.file_id if photo else document.file_id
     
     status_msg = await message.answer("🔍 Распознаю код... Это может занять несколько минут.")
     
-    file = await message.bot.get_file(file_id)
-    buffer = io.BytesIO()
-    await message.bot.download_file(file.file_path, destination=buffer)
-    codes, is_ours = await decode_image(buffer.getvalue())
-    
     try:
-        await status_msg.delete()
-    except Exception:
-        pass
+        file = await message.bot.get_file(file_id)
+        buffer = io.BytesIO()
+        try:
+            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=buffer), timeout=30)
+        except asyncio.TimeoutError:
+            await message.answer("⚠️ Ошибка: Время ожидания истекло. Пожалуйста, попробуйте отправить фото еще раз.", reply_markup=cancel_kb())
+            return
+        except Exception as e:
+            logging.error(f"Download error: {e}")
+            await message.answer("⚠️ Произошла ошибка при загрузке фото. Попробуйте еще раз.", reply_markup=cancel_kb())
+            return
+            
+        codes, is_ours = await decode_image(buffer.getvalue())
+    finally:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
 
-    if not codes:
+    if not codes or not is_ours:
+        failures += 1
+        await state.update_data(cz_failures_claim=failures)
+        
+        if failures >= 2:
+            await state.set_state(ClaimStates.purchase_cz_text)
+            await message.answer(
+                "⚠️ Не удалось распознать фото.\n\n"
+                "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
+                "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+                reply_markup=cancel_kb()
+            )
+            return
+
+        error_text = "Не удалось прочитать код. Попробуйте более четкое фото."
+        if codes and not is_ours:
+            error_text = f"Код не относится к нашей продукции: {codes[0]}\nПожалуйста, отправьте корректный код ЧЗ."
+        
         await message.answer(
-            "Не удалось прочитать код. Попробуйте более четкое фото.",
-            reply_markup=cancel_kb(),
+            error_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+            ])
         )
         return
-    if not is_ours:
-        await message.answer(
-            f"Код не относится к нашей продукции: {codes[0]}\n"
-            "Пожалуйста, отправьте корректный код ЧЗ.",
-            reply_markup=cancel_kb(),
-        )
-        return
+
     cz_code = codes[0]
     await db.add_cz_code(message.from_user.id, cz_code)
     await state.update_data(purchase_value=cz_code)
@@ -1229,6 +1337,27 @@ async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None
     await message.answer(
         "Расшифровка:\n"
         f"{format_decoded_codes(codes)}\n"
+        "Пришлите фото/видео (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
+        reply_markup=files_kb(),
+    )
+
+
+async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
+        return
+    
+    cz_code = message.text.strip()
+    if len(cz_code) < 10:
+        await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
+        return
+
+    await db.add_cz_code(message.from_user.id, cz_code)
+    await state.update_data(purchase_value=cz_code)
+    await state.set_state(ClaimStates.files)
+    await state.update_data(files=[])
+    await message.answer(
+        "Код принят! ✅\n"
         "Пришлите фото/видео (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
         reply_markup=files_kb(),
     )
@@ -1331,10 +1460,16 @@ async def finalize_claim(message: Message, state: FSMContext, user: Any, phone: 
 
 async def start_warranty_activation(message: Message, state: FSMContext) -> None:
     await state.set_state(WarrantyStates.cz_photo)
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+    ])
+    
     await message.answer(
         "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
         "Отправьте фото кода Честный знак.",
-        reply_markup=cancel_kb(),
+        reply_markup=kb,
     )
 
 
@@ -1342,19 +1477,7 @@ async def warranty_start_handler(message: Message, state: FSMContext) -> None:
     await upsert_from_user(message.from_user)
     warranties = await db.get_warranties(message.from_user.id)
     if warranties:
-        text = "Ваши активные гарантии:\n\n"
-        for w in warranties:
-            end_date = w['end_date']
-            try:
-                end_date = dt.date.fromisoformat(end_date).strftime("%d.%m.%Y")
-            except: pass
-            text += f"📦 **{w.get('sku', 'Изделие')}**\nДо: {end_date}\nКод: `{w['cz_code'][:15]}...`\n\n"
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Активировать еще", callback_data="warranty:new")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ])
-        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await show_user_warranties(message, message.from_user.id)
     else:
         await start_warranty_activation(message, state)
 
@@ -1365,19 +1488,7 @@ async def warranty_start_callback_handler(callback: CallbackQuery, state: FSMCon
     warranties = await db.get_warranties(callback.from_user.id)
     
     if warranties:
-        text = "Ваши активные гарантии:\n\n"
-        for w in warranties:
-            end_date = w['end_date']
-            try:
-                end_date = dt.date.fromisoformat(end_date).strftime("%d.%m.%Y")
-            except: pass
-            text += f"📦 **{w.get('sku', 'Изделие')}**\nДо: {end_date}\nКод: `{w['cz_code'][:15]}...`\n\n"
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Активировать еще", callback_data="warranty:new")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ])
-        await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await show_user_warranties(callback.message, callback.from_user.id)
     else:
         await start_warranty_activation(callback.message, state)
 
@@ -1387,11 +1498,30 @@ async def warranty_new_callback_handler(callback: CallbackQuery, state: FSMConte
     await start_warranty_activation(callback.message, state)
 
 
+async def warranty_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(WarrantyStates.cz_text)
+    await callback.message.answer(
+        "Введите код Честный знак вручную.\n\n"
+        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
+        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+        reply_markup=cancel_kb()
+    )
+
+
 async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
     photo = message.photo[-1] if message.photo else None
     document = message.document if message.document else None
+    
+    data = await state.get_data()
+    failures = data.get("cz_failures", 0)
+
     if not photo and not document:
-        await message.answer("Нужна фотография Честного знака.", reply_markup=cancel_kb())
+        # If user sent text instead of photo while in cz_photo state
+        await message.answer("Нужна фотография Честного знака или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+        ]))
         return
 
     file_id = photo.file_id if photo else document.file_id
@@ -1418,21 +1548,55 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         except Exception:
             pass
 
-    if not codes:
+    if not codes or not is_ours:
+        failures += 1
+        await state.update_data(cz_failures=failures)
+        
+        if failures >= 2:
+            await state.set_state(WarrantyStates.cz_text)
+            await message.answer(
+                "⚠️ Не удалось распознать фото.\n\n"
+                "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
+                "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+                reply_markup=cancel_kb()
+            )
+            return
+
+        error_text = "Не удалось прочитать код. Попробуйте более четкое фото."
+        if codes and not is_ours:
+            error_text = f"Код не относится к нашей продукции: {codes[0]}\nПожалуйста, отправьте корректный код ЧЗ."
+        
         await message.answer(
-            "Не удалось прочитать код. Попробуйте более четкое фото.",
-            reply_markup=cancel_kb(),
+            error_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+            ])
         )
         return
-    if not is_ours:
-        await message.answer(
-            f"Код не относится к нашей продукции: {codes[0]}\n"
-            "Пожалуйста, отправьте корректный код ЧЗ.",
-            reply_markup=cancel_kb(),
-        )
-        return
+
     cz_code = codes[0]
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
+    await state.set_state(WarrantyStates.receipt_pdf)
+    await message.answer(
+        "Код принят! ✅\n"
+        "Теперь, пожалуйста, отправьте чек с WB в формате PDF.",
+        reply_markup=cancel_kb(),
+    )
+
+
+async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
+        return
+    
+    cz_code = message.text.strip()
+    # Simple validation: usually it starts with 01 and has some length
+    if len(cz_code) < 10:
+        await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
+        return
+
+    await state.update_data(cz_code=cz_code, cz_file_id=None)
     await state.set_state(WarrantyStates.receipt_pdf)
     await message.answer(
         "Код принят! ✅\n"
@@ -1451,35 +1615,35 @@ async def warranty_receipt_handler(message: Message, state: FSMContext) -> None:
     status_msg = await message.answer("📄 Обрабатываю чек... Это займет мгновение.")
     
     try:
-        file = await message.bot.get_file(file_id)
-        
-        # Create data directory if it doesn't exist
-        os.makedirs("data", exist_ok=True)
-        temp_path = f"data/temp_{file_id}.pdf"
+    file = await message.bot.get_file(file_id)
+    
+    # Create data directory if it doesn't exist
+    os.makedirs("data", exist_ok=True)
+    temp_path = f"data/temp_{file_id}.pdf"
         
         try:
             await asyncio.wait_for(message.bot.download_file(file.file_path, destination=temp_path), timeout=60)
         except asyncio.TimeoutError:
             await message.answer("⚠️ Ошибка: Файл слишком долго загружается. Попробуйте еще раз.", reply_markup=cancel_kb())
             return
-        
-        receipt_date = None
-        receipt_text = None
+    
+    receipt_date = None
+    receipt_text = None
         receipt_items = None
-        try:
-            parser = ReceiptParser()
-            receipt_data = parser.parse_pdf(temp_path)
-            receipt_date = receipt_data.date
-            receipt_text = receipt_data.raw_text
+    try:
+        parser = ReceiptParser()
+        receipt_data = parser.parse_pdf(temp_path)
+        receipt_date = receipt_data.date
+        receipt_text = receipt_data.raw_text
             
             # Render items list
             from app.receipt_parser import render_items
             receipt_items = render_items(receipt_data.items)
-        except Exception as e:
-            logging.error(f"Error parsing PDF: {e}")
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+    except Exception as e:
+        logging.error(f"Error parsing PDF: {e}")
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
     finally:
         try:
             await status_msg.delete()
@@ -1698,6 +1862,8 @@ async def main() -> None:
     dp.callback_query.register(admin_kb_link_add_start, F.data.startswith("admin:kb_link_add:"))
     dp.callback_query.register(admin_kb_link_del_handler, F.data.startswith("admin:kb_link_del:"))
     dp.callback_query.register(admin_kb_link_edit_start, F.data.startswith("admin:kb_link_edit:"))
+    dp.callback_query.register(warranty_cz_text_start_handler, F.data == "warranty:cz_text_start")
+    dp.callback_query.register(claim_cz_text_start_handler, F.data == "claim:cz_text_start")
 
     dp.message.register(admin_kb_save_handler, AdminStates.kb_edit_text)
     dp.message.register(admin_kb_link_add_label, AdminStates.kb_add_link_label)
@@ -1712,6 +1878,7 @@ async def main() -> None:
     dp.callback_query.register(faq_ask_handler, F.data == "faq:ask")
     dp.callback_query.register(cancel_callback_handler, F.data == "cancel")
     dp.callback_query.register(claim_start_callback_handler, F.data == "menu:claim")
+    dp.callback_query.register(my_items_callback_handler, F.data == "menu:my_items")
     dp.callback_query.register(claims_menu_callback_handler, F.data == "menu:claims")
     dp.callback_query.register(warranty_start_callback_handler, F.data == "menu:warranty")
     dp.callback_query.register(warranty_new_callback_handler, F.data == "warranty:new")
@@ -1722,6 +1889,7 @@ async def main() -> None:
     dp.callback_query.register(faq_callback_handler, F.data == "menu:faq")
 
     dp.message.register(claims_menu_handler, Command("claims"))
+    dp.message.register(my_items_handler, Command("items"))
     dp.message.register(claim_start_handler, Command("claim"))
     dp.message.register(warranty_start_handler, Command("warranty"))
 
@@ -1730,6 +1898,7 @@ async def main() -> None:
     dp.callback_query.register(claim_purchase_type_handler, ClaimStates.purchase_type)
     dp.message.register(claim_purchase_wb_handler, ClaimStates.purchase_wb)
     dp.message.register(claim_purchase_cz_handler, ClaimStates.purchase_cz_photo)
+    dp.message.register(claim_purchase_cz_text_handler, ClaimStates.purchase_cz_text)
     dp.message.register(claim_files_handler, ClaimStates.files)
     dp.callback_query.register(claim_files_done_handler, F.data == "files:done", ClaimStates.files)
     dp.message.register(claim_contact_name_handler, ClaimStates.contact_name)
@@ -1737,14 +1906,15 @@ async def main() -> None:
     dp.callback_query.register(claim_skip_phone_handler, F.data == "skip:phone", ClaimStates.contact_phone)
 
     dp.message.register(warranty_cz_handler, WarrantyStates.cz_photo)
+    dp.message.register(warranty_cz_text_handler, WarrantyStates.cz_text)
     dp.message.register(warranty_receipt_handler, WarrantyStates.receipt_pdf, F.document)
     dp.message.register(warranty_sku_handler, WarrantyStates.sku)
     dp.message.register(warranty_name_handler, WarrantyStates.name)
 
     dp.message.register(unexpected_state_message_handler)
 
-    # Forwarding handlers (only if no state is active)
-    dp.message.register(admin_group_reply_handler, F.chat.type.in_({"supergroup", "group"}))
+    # Forwarding handlers
+    dp.message.register(admin_group_reply_handler, F.chat.type.in_({"supergroup", "group"}), ~F.text.startswith("/"))
     dp.message.register(attach_clarification, F.chat.type == "private", StateFilter(None))
 
     # Move generic handlers down
