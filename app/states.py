@@ -1,11 +1,12 @@
 from aiogram.fsm.state import State, StatesGroup
 
 class ClaimStates(StatesGroup):
-    description = State()
     purchase_type = State()
-    purchase_wb = State()
     purchase_cz_photo = State()
     purchase_cz_text = State()
+    purchase_receipt_pdf = State()
+    purchase_sku = State()
+    description = State()
     files = State()
     contact_name = State()
     contact_phone = State()

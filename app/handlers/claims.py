@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import uuid
+import datetime as dt
 from typing import Any
 
 from aiogram import F, Router
@@ -17,6 +18,7 @@ from app.keyboards import (
     skip_kb, warranties_selection_kb, claim_status_kb
 )
 from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim
+from app.receipt_parser import ReceiptParser, render_items
 
 router = Router()
 
@@ -75,7 +77,16 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     await callback.answer()
     data = callback.data
     if data == "select_w:other":
-        await callback.message.answer("Выберите способ идентификации:", reply_markup=purchase_type_kb())
+        await state.set_state(ClaimStates.purchase_cz_photo)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+        ])
+        await callback.message.answer(
+            "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
+            "Отправьте фото кода Честный знак.",
+            reply_markup=kb,
+        )
         return
 
     warranty_id = data.replace("select_w:", "")
@@ -83,58 +94,30 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     selected = next((w for w in warranties if w["id"] == warranty_id), None)
     
     if not selected:
-        await callback.message.answer("Ошибка: изделие не найдено. Выберите другой способ.", reply_markup=purchase_type_kb())
+        await callback.message.answer("Ошибка: изделие не найдено. Пожалуйста, попробуйте еще раз.", reply_markup=main_menu_kb())
         return
 
-    await state.update_data(purchase_type="ЧЗ (из гарантии)", purchase_value=selected["cz_code"], sku=selected.get("sku"))
+    await state.update_data(
+        purchase_type="ЧЗ (из гарантии)", 
+        purchase_value=selected["cz_code"], 
+        sku=selected.get("sku")
+    )
     await state.set_state(ClaimStates.description)
     await callback.message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
 
-@router.callback_query(ClaimStates.purchase_type)
-async def claim_purchase_type_handler(callback: CallbackQuery, state: FSMContext) -> None:
+@router.callback_query(F.data == "claim:cz_text_start")
+async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    if callback.data == "purchase:wb":
-        await state.update_data(purchase_type="WB")
-        await state.set_state(ClaimStates.purchase_wb)
-        await callback.message.answer(
-            "Отправьте фото чека WB.",
-            reply_markup=cancel_kb(),
-        )
-        return
-    if callback.data == "purchase:cz":
-        await state.update_data(purchase_type="ЧЗ")
-        await state.set_state(ClaimStates.purchase_cz_photo)
-        
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ])
-        
-        await callback.message.answer(
-            "Отправьте фото кода Честный знак.",
-            reply_markup=kb,
-        )
-        return
-
-@router.message(ClaimStates.purchase_wb)
-async def claim_purchase_wb_handler(message: Message, state: FSMContext) -> None:
-    photo = message.photo[-1] if message.photo else None
-    document = message.document if message.document else None
-    if not photo and not document:
-        await message.answer("Нужна фотография чека WB.")
-        return
-
-    file_id = photo.file_id if photo else document.file_id
-    await state.update_data(purchase_value="WB чек (фото)")
-    await state.set_state(ClaimStates.description)
-    await state.update_data(files=[{"file_id": file_id, "file_type": "wb_receipt"}])
-    await message.answer(
-        "Чек получен. Опишите ситуацию текстом.",
-        reply_markup=cancel_kb(),
+    await state.set_state(ClaimStates.purchase_cz_text)
+    await callback.message.answer(
+        "Введите код Честный знак вручную.\n\n"
+        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
+        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+        reply_markup=cancel_kb()
     )
 
 @router.message(ClaimStates.purchase_cz_photo)
-async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None:
+async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -> None:
     photo = message.photo[-1] if message.photo else None
     document = message.document if message.document else None
     
@@ -149,12 +132,21 @@ async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None
         return
 
     file_id = photo.file_id if photo else document.file_id
-    status_msg = await message.answer("🔍 Распознаю код... Это может занять несколько минут.")
+    status_msg = await message.answer("🔍 Распознаю код... Это может занять несколько секунд.")
     
     try:
         file = await message.bot.get_file(file_id)
         buffer = io.BytesIO()
-        await message.bot.download_file(file.file_path, destination=buffer)
+        try:
+            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=buffer), timeout=30)
+        except asyncio.TimeoutError:
+            await message.answer("⚠️ Ошибка: Время ожидания истекло. Пожалуйста, попробуйте отправить фото еще раз.", reply_markup=cancel_kb())
+            return
+        except Exception as e:
+            logging.error(f"Download error: {e}")
+            await message.answer("⚠️ Произошла ошибка при загрузке фото. Попробуйте еще раз.", reply_markup=cancel_kb())
+            return
+            
         codes, is_ours = await decode_image(buffer.getvalue())
     finally:
         try:
@@ -190,12 +182,11 @@ async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None
         return
 
     cz_code = codes[0]
-    await db.add_cz_code(message.from_user.id, cz_code)
-    await state.update_data(purchase_value=cz_code)
-    await state.set_state(ClaimStates.description)
+    await state.update_data(cz_code=cz_code, cz_file_id=file_id)
+    await state.set_state(ClaimStates.purchase_receipt_pdf)
     await message.answer(
         "Код принят! ✅\n"
-        "Опишите ситуацию текстом.",
+        "Теперь, пожалуйста, отправьте чек с WB в формате PDF.",
         reply_markup=cancel_kb(),
     )
 
@@ -210,12 +201,100 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
         await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
         return
 
-    await db.add_cz_code(message.from_user.id, cz_code)
-    await state.update_data(purchase_value=cz_code)
-    await state.set_state(ClaimStates.description)
+    await state.update_data(cz_code=cz_code, cz_file_id=None)
+    await state.set_state(ClaimStates.purchase_receipt_pdf)
     await message.answer(
         "Код принят! ✅\n"
-        "Опишите ситуацию текстом.",
+        "Теперь, пожалуйста, отправьте чек с WB в формате PDF.",
+        reply_markup=cancel_kb(),
+    )
+
+@router.message(ClaimStates.purchase_receipt_pdf, F.document)
+async def claim_purchase_receipt_handler(message: Message, state: FSMContext) -> None:
+    if not message.document or not message.document.file_name.lower().endswith(".pdf"):
+        await message.answer("Пожалуйста, отправьте чек в формате PDF.", reply_markup=cancel_kb())
+        return
+
+    file_id = message.document.file_id
+    status_msg = await message.answer("📄 Обрабатываю чек... Это займет мгновение.")
+    
+    try:
+        file = await message.bot.get_file(file_id)
+        os.makedirs("data", exist_ok=True)
+        temp_path = f"data/temp_claim_{file_id}.pdf"
+        
+        try:
+            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=temp_path), timeout=60)
+        except asyncio.TimeoutError:
+            await message.answer("⚠️ Ошибка: Файл слишком долго загружается. Попробуйте еще раз.", reply_markup=cancel_kb())
+            return
+        
+        receipt_date = None
+        receipt_text = None
+        receipt_items = None
+        try:
+            parser = ReceiptParser()
+            receipt_data = parser.parse_pdf(temp_path)
+            receipt_date = receipt_data.date
+            receipt_text = receipt_data.raw_text
+            receipt_items = render_items(receipt_data.items)
+        except Exception as e:
+            logging.error(f"Error parsing PDF: {e}")
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    finally:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+    await state.update_data(
+        receipt_file_id=file_id, 
+        receipt_date=receipt_date,
+        receipt_text=receipt_text,
+        receipt_items=receipt_items
+    )
+    await state.set_state(ClaimStates.purchase_sku)
+    await message.answer(
+        "Чек получен! ✅\n"
+        "Теперь введите артикул товара.",
+        reply_markup=cancel_kb(),
+    )
+
+@router.message(ClaimStates.purchase_sku)
+async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите артикул товара текстом.", reply_markup=cancel_kb())
+        return
+    
+    sku = message.text
+    await state.update_data(sku=sku)
+    
+    # Save as warranty first
+    data = await state.get_data()
+    warranty_id = uuid.uuid4().hex[:8]
+    await db.create_warranty(
+        warranty_id=warranty_id,
+        tg_id=message.from_user.id,
+        cz_code=data["cz_code"],
+        cz_file_id=data.get("cz_file_id"),
+        receipt_file_id=data["receipt_file_id"],
+        sku=sku,
+        receipt_date=data["receipt_date"],
+        receipt_text=data.get("receipt_text"),
+        receipt_items=data.get("receipt_items")
+    )
+    
+    await state.update_data(
+        purchase_type="ЧЗ (новая гарантия)", 
+        purchase_value=data["cz_code"]
+    )
+    
+    await state.set_state(ClaimStates.description)
+    await message.answer(
+        f"Изделие '{sku}' успешно зарегистрировано! ✅\n\n"
+        "Теперь опишите ситуацию по этому изделию текстом.",
         reply_markup=cancel_kb(),
     )
 
