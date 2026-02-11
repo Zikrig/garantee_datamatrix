@@ -76,22 +76,11 @@ async def claim_description_handler(message: Message, state: FSMContext) -> None
         await message.answer("Выберите идентификатор покупки:", reply_markup=purchase_type_kb())
         return
 
-    if len(warranties) == 1:
-        w = warranties[0]
-        await state.update_data(purchase_type="ЧЗ (из гарантии)", purchase_value=w["cz_code"])
-        await state.set_state(ClaimStates.files)
-        await state.update_data(files=[])
-        await message.answer(
-            f"Выбрано изделие: {w.get('sku') or 'Без артикула'}\n"
-            "Пришлите фото/видео неисправности (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
-            reply_markup=files_kb(),
-        )
-    else:
-        await state.set_state(ClaimStates.purchase_type)
-        await message.answer(
-            "Выберите изделие, по которому подаете обращение:",
-            reply_markup=warranties_selection_kb(warranties)
-        )
+    await state.set_state(ClaimStates.purchase_type)
+    await message.answer(
+        "Выберите изделие, по которому подаете обращение:",
+        reply_markup=warranties_selection_kb(warranties)
+    )
 
 @router.callback_query(F.data.startswith("select_w:"), ClaimStates.purchase_type)
 async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMContext) -> None:

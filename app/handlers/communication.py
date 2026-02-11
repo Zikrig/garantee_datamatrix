@@ -10,24 +10,29 @@ from app.constants import MAIN_MENU
 
 router = Router()
 
-@router.message(F.chat.type == "private", StateFilter(None))
+from aiogram.filters import StateFilter, Filter
+
+class HasActiveClaim(Filter):
+    async def __call__(self, message: Message) -> bool:
+        claim = await db.get_last_claim_by_status(message.from_user.id, "Нужны уточнения") or \
+                await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
+                await db.get_last_claim_by_status(message.from_user.id, "Новая")
+        return bool(claim)
+
+@router.message(
+    F.chat.type == "private", 
+    StateFilter(None), 
+    ~F.text.startswith("/"), 
+    ~F.text.in_(MAIN_MENU), 
+    ~F.text.in_({"Отмена", "Готово", "Пропустить", "Чек WB", "Честный знак"}),
+    HasActiveClaim()
+)
 async def attach_clarification(message: Message, bot: Bot, state: FSMContext) -> bool:
     # Forward user message to admin thread if user has an active claim
-    if message.text and message.text.startswith("/"):
-        return False
-        
-    if message.text and (message.text in MAIN_MENU or message.text in {
-        "Отмена", "Готово", "Пропустить", "Чек WB", "Честный знак",
-    }):
-        return False
-
     claim = await db.get_last_claim_by_status(message.from_user.id, "Нужны уточнения") or \
             await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
             await db.get_last_claim_by_status(message.from_user.id, "Новая")
     
-    if not claim:
-        return False
-
     logging.info(f"Forwarding message from user {message.from_user.id} to admin thread")
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:

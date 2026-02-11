@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.database import db
-from app.handlers import common, admin, warranty, claims, kb_admin, communication
+from app.handlers import common, admin, warranty, claims, kb_admin, communication, unexpected
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
@@ -19,8 +19,7 @@ async def main() -> None:
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Order matters: communication handlers (relaying) should be after state-specific handlers
-    # but before generic message handlers. AIogram 3.x routers handle this via order of include.
+    # Order matters for AIogram 3.x routers
     
     # 1. Admin & KB Management
     dp.include_router(admin.router)
@@ -30,11 +29,14 @@ async def main() -> None:
     dp.include_router(warranty.router)
     dp.include_router(claims.router)
     
-    # 3. Communication/Relay (should be after states to not catch state messages)
+    # 3. Common handlers (Commands, Menu buttons) - must be before communication relay
+    dp.include_router(common.router)
+    
+    # 4. Communication/Relay (catches non-command messages when no state is active)
     dp.include_router(communication.router)
     
-    # 4. Common (Start, Menu, Unexpected)
-    dp.include_router(common.router)
+    # 5. Unexpected/Catch-all (at the very end)
+    dp.include_router(unexpected.router)
 
     logging.info("Bot started polling")
     await dp.start_polling(bot)
