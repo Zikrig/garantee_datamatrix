@@ -24,8 +24,9 @@ router = Router()
 @router.message(Command("claim"))
 async def claim_start_handler(message: Message, state: FSMContext) -> None:
     await upsert_from_user(db, message.from_user)
-    has_warranty = await db.has_warranty(message.from_user.id)
-    if not has_warranty:
+    
+    warranties = await db.get_warranties(message.from_user.id)
+    if not warranties:
         await message.answer(
             "Чтобы оформить заявку по гарантии, вам необходимо зарегистрироваться.\n"
             "Это обеспечит вам 12 месяцев гарантийного обслуживания.",
@@ -38,16 +39,19 @@ async def claim_start_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
-    await state.set_state(ClaimStates.description)
-    await message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
+    await state.set_state(ClaimStates.purchase_type)
+    await message.answer(
+        "Выберите изделие, по которому подаете обращение:",
+        reply_markup=warranties_selection_kb(warranties)
+    )
 
 @router.callback_query(F.data == "menu:claim")
 async def claim_start_callback_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await upsert_from_user(db, callback.from_user)
     
-    has_warranty = await db.has_warranty(callback.from_user.id)
-    if not has_warranty:
+    warranties = await db.get_warranties(callback.from_user.id)
+    if not warranties:
         await callback.message.answer(
             "Чтобы оформить заявку по гарантии, вам необходимо зарегистрироваться.\n"
             "Это обеспечит вам 12 месяцев гарантийного обслуживания.",
@@ -60,24 +64,8 @@ async def claim_start_callback_handler(callback: CallbackQuery, state: FSMContex
         )
         return
 
-    await state.set_state(ClaimStates.description)
-    await callback.message.answer(
-        "Опишите ситуацию текстом.",
-        reply_markup=cancel_kb(),
-    )
-
-@router.message(ClaimStates.description)
-async def claim_description_handler(message: Message, state: FSMContext) -> None:
-    await state.update_data(description=message.text)
-    
-    warranties = await db.get_warranties(message.from_user.id)
-    if not warranties:
-        await state.set_state(ClaimStates.purchase_type)
-        await message.answer("Выберите идентификатор покупки:", reply_markup=purchase_type_kb())
-        return
-
     await state.set_state(ClaimStates.purchase_type)
-    await message.answer(
+    await callback.message.answer(
         "Выберите изделие, по которому подаете обращение:",
         reply_markup=warranties_selection_kb(warranties)
     )
@@ -98,14 +86,9 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
         await callback.message.answer("Ошибка: изделие не найдено. Выберите другой способ.", reply_markup=purchase_type_kb())
         return
 
-    await state.update_data(purchase_type="ЧЗ (из гарантии)", purchase_value=selected["cz_code"])
-    await state.set_state(ClaimStates.files)
-    await state.update_data(files=[])
-    await callback.message.answer(
-        f"Выбрано изделие: {selected.get('sku') or 'Без артикула'}\n"
-        "Пришлите фото/видео неисправности (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
-        reply_markup=files_kb(),
-    )
+    await state.update_data(purchase_type="ЧЗ (из гарантии)", purchase_value=selected["cz_code"], sku=selected.get("sku"))
+    await state.set_state(ClaimStates.description)
+    await callback.message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
 
 @router.callback_query(ClaimStates.purchase_type)
 async def claim_purchase_type_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -143,22 +126,11 @@ async def claim_purchase_wb_handler(message: Message, state: FSMContext) -> None
 
     file_id = photo.file_id if photo else document.file_id
     await state.update_data(purchase_value="WB чек (фото)")
-    await state.set_state(ClaimStates.files)
+    await state.set_state(ClaimStates.description)
     await state.update_data(files=[{"file_id": file_id, "file_type": "wb_receipt"}])
     await message.answer(
-        "Чек получен. Пришлите фото/видео (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
-        reply_markup=files_kb(),
-    )
-
-@router.callback_query(F.data == "claim:cz_text_start")
-async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.set_state(ClaimStates.purchase_cz_text)
-    await callback.message.answer(
-        "Введите код Честный знак вручную.\n\n"
-        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
-        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
-        reply_markup=cancel_kb()
+        "Чек получен. Опишите ситуацию текстом.",
+        reply_markup=cancel_kb(),
     )
 
 @router.message(ClaimStates.purchase_cz_photo)
@@ -220,13 +192,11 @@ async def claim_purchase_cz_handler(message: Message, state: FSMContext) -> None
     cz_code = codes[0]
     await db.add_cz_code(message.from_user.id, cz_code)
     await state.update_data(purchase_value=cz_code)
-    await state.set_state(ClaimStates.files)
-    await state.update_data(files=[])
+    await state.set_state(ClaimStates.description)
     await message.answer(
-        "Расшифровка:\n"
-        f"{format_decoded_codes(codes)}\n"
-        "Пришлите фото/видео (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
-        reply_markup=files_kb(),
+        "Код принят! ✅\n"
+        "Опишите ситуацию текстом.",
+        reply_markup=cancel_kb(),
     )
 
 @router.message(ClaimStates.purchase_cz_text)
@@ -242,11 +212,25 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
 
     await db.add_cz_code(message.from_user.id, cz_code)
     await state.update_data(purchase_value=cz_code)
-    await state.set_state(ClaimStates.files)
-    await state.update_data(files=[])
+    await state.set_state(ClaimStates.description)
     await message.answer(
         "Код принят! ✅\n"
-        "Пришлите фото/видео (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
+        "Опишите ситуацию текстом.",
+        reply_markup=cancel_kb(),
+    )
+
+@router.message(ClaimStates.description)
+async def claim_description_handler(message: Message, state: FSMContext) -> None:
+    await state.update_data(description=message.text)
+    await state.set_state(ClaimStates.files)
+    await state.update_data(files=[])
+    
+    data = await state.get_data()
+    sku = data.get("sku") or "Изделие"
+    
+    await message.answer(
+        f"Выбрано изделие: {sku}\n"
+        "Пришлите фото/видео неисправности (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
         reply_markup=files_kb(),
     )
 
@@ -344,4 +328,3 @@ async def finalize_claim(message: Message, state: FSMContext, user: Any, phone: 
         reply_markup=main_menu_kb(),
     )
     await state.clear()
-
