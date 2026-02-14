@@ -1,4 +1,5 @@
 import logging
+from html import escape
 from aiogram import F, Router, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
@@ -17,12 +18,12 @@ async def admin_handler(message: Message) -> None:
         return
     
     group_id = await db.get_setting("admin_group_id")
-    status = f"✅ Группа привязана: `{group_id}`" if group_id else "❌ Группа не привязана. Напишите /add в супергруппе."
+    status = f"✅ Группа привязана: <code>{escape(str(group_id))}</code>" if group_id else "❌ Группа не привязана. Напишите /add в супергруппе."
     
     await message.answer(
         f"Панель администратора:\n\n{status}", 
         reply_markup=admin_menu_kb(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.message(Command("add"))
@@ -86,12 +87,12 @@ async def admin_menu_callback_handler(callback: CallbackQuery) -> None:
         return
     
     group_id = await db.get_setting("admin_group_id")
-    status = f"✅ Группа привязана: `{group_id}`" if group_id else "❌ Группа не привязана. Напишите /add в супергруппе."
+    status = f"✅ Группа привязана: <code>{escape(str(group_id))}</code>" if group_id else "❌ Группа не привязана. Напишите /add в супергруппе."
     
     await callback.message.edit_text(
         f"Панель администратора:\n\n{status}", 
         reply_markup=admin_menu_kb(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await callback.answer()
 
@@ -142,21 +143,21 @@ async def claim_details_handler(callback: CallbackQuery) -> None:
         warranties = await db.get_warranties(claim['tg_id'])
         w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
         if w and w.get('receipt_items'):
-            products_info = f"\n**Товары в чеке:**\n{w['receipt_items']}"
+            products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
 
     text = (
-        f"🛠 **Заявка {claim['id']}**\n"
-        f"Статус: {claim['status']}\n"
-        f"Идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
+        f"🛠 <b>Заявка {escape(claim['id'])}</b>\n"
+        f"Статус: {escape(claim['status'])}\n"
+        f"Идентификатор: {escape(claim['purchase_type'])} / {escape(claim['purchase_value'])}\n"
         f"{products_info}\n"
-        f"**Текст проблемы:**\n{claim['description']}"
+        f"<b>Текст проблемы:</b>\n{escape(claim['description'])}"
     )
     
     is_admin = ADMIN_CHAT_IDS and callback.from_user.id in ADMIN_CHAT_IDS
     from app.keyboards import main_menu_kb
     kb = claim_status_kb(claim['id'], claim['status']) if is_admin else main_menu_kb()
     
-    await callback.message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await callback.message.answer(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data.startswith("reply:"))

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+from html import escape
 from aiogram import Bot
 from aiogram.types import FSInputFile
 from app.scanner import extract_datamatrix
@@ -141,7 +142,7 @@ async def send_admin_claim(
         warranties = await db.get_warranties(claim['tg_id'])
         w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
         if w and w.get('receipt_items'):
-            products_info = f"\n**Товары в чеке:**\n{w['receipt_items']}"
+            products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
 
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
@@ -149,20 +150,20 @@ async def send_admin_claim(
             return
 
         text = (
-            "🛠 Новая заявка\n"
-            f"claim_id: {claim['id']}\n"
-            f"дата: {claim['created_at']}\n"
-            f"tg: {claim['tg_id']} @{username or '-'}\n"
-            f"имя: {name or '-'}\n"
-            f"телефон: {phone or '-'}\n"
-            f"email: {email or '-'}\n"
-            f"идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
+            "🛠 <b>Новая заявка</b>\n"
+            f"claim_id: <code>{escape(claim['id'])}</code>\n"
+            f"дата: {escape(claim['created_at'])}\n"
+            f"tg: {claim['tg_id']} @{escape(username or '-')}\n"
+            f"имя: {escape(name or '-')}\n"
+            f"телефон: {escape(phone or '-')}\n"
+            f"email: {escape(email or '-')}\n"
+            f"идентификатор: {escape(claim['purchase_type'])} / {escape(claim['purchase_value'])}\n"
             f"{products_info}\n"
-            f"текст: {claim['description']}\n"
+            f"текст: {escape(claim['description'])}\n"
         )
         for admin_id in ADMIN_CHAT_IDS:
             try:
-                await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"]), parse_mode="Markdown")
+                await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"]), parse_mode="HTML")
             except Exception as e:
                 logging.error(f"Failed to send message to admin {admin_id}: {e}")
 
@@ -187,16 +188,16 @@ async def send_admin_claim(
         return
 
     text = (
-        "🛠 **Новая заявка**\n"
-        f"ID: `{claim['id']}`\n"
-        f"Дата: {claim['created_at']}\n"
-        f"Пользователь: @{username or '-'}\n"
-        f"Имя: {name or '-'}\n"
-        f"Телефон: {phone or '-'}\n"
-        f"Email: {email or '-'}\n"
-        f"Идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
+        "🛠 <b>Новая заявка</b>\n"
+        f"ID: <code>{escape(claim['id'])}</code>\n"
+        f"Дата: {escape(claim['created_at'])}\n"
+        f"Пользователь: @{escape(username or '-')}\n"
+        f"Имя: {escape(name or '-')}\n"
+        f"Телефон: {escape(phone or '-')}\n"
+        f"Email: {escape(email or '-')}\n"
+        f"Идентификатор: {escape(claim['purchase_type'])} / {escape(claim['purchase_value'])}\n"
         f"{products_info}\n"
-        f"**Текст проблемы:**\n{claim['description']}"
+        f"<b>Текст проблемы:</b>\n{escape(claim['description'])}"
     )
     
     group_msg = await bot.send_message(
@@ -204,7 +205,7 @@ async def send_admin_claim(
         text, 
         message_thread_id=thread_id, 
         reply_markup=claim_status_kb(claim["id"], is_group=True),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     
     try:
@@ -218,14 +219,14 @@ async def send_admin_claim(
     msg_link = f"https://t.me/c/{clean_group_id}/{group_msg.message_id}"
     
     private_text = (
-        f"🛠 **Новая заявка {claim['id']}**\n"
-        f"Пользователь: @{username or '-'}\n"
+        f"🛠 <b>Новая заявка {escape(claim['id'])}</b>\n"
+        f"Пользователь: @{escape(username or '-')}\n"
         f"Ссылка: {msg_link}"
     )
     
     for admin_id in ADMIN_CHAT_IDS:
         try:
-            await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="Markdown")
+            await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="HTML")
         except Exception as e:
             logging.error(f"Failed to send notification to admin {admin_id}: {e}")
 

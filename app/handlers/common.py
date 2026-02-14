@@ -1,5 +1,6 @@
 import datetime as dt
 import os
+from html import escape
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -24,13 +25,13 @@ async def start_handler(message: Message) -> None:
     if not has_warranty:
         text = (
             "Добро пожаловать! 👋\n\n"
-            "Зарегистрируйтесь сейчас и получите **гарантию на 12 месяцев** на ваше изделие!\n\n"
+            "Зарегистрируйтесь сейчас и получите <b>гарантию на 12 месяцев</b> на ваше изделие!\n\n"
             "Выберите действие из меню."
         )
     await message.answer(
         text,
         reply_markup=main_menu_kb(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.message(Command("cancel"))
@@ -60,7 +61,7 @@ async def show_user_warranties(message: Message, user_id: int) -> None:
         )
         return
 
-    text = "📦 **Ваши изделия с активной гарантией:**\n\n"
+    text = "📦 <b>Ваши изделия с активной гарантией:</b>\n\n"
     for w in warranties:
         end_date = w['end_date']
         try:
@@ -68,14 +69,14 @@ async def show_user_warranties(message: Message, user_id: int) -> None:
         except:
             pass
         sku = w.get('sku') or 'Изделие'
-        text += f"🔹 **{sku}**\n🗓 Гарантия до: {end_date}\n🔢 Код: `{w['cz_code'][:15]}...`\n\n"
+        text += f"🔹 <b>{escape(sku)}</b>\n🗓 Гарантия до: {escape(end_date)}\n🔢 Код: <code>{escape(w['cz_code'][:15])}...</code>\n\n"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Активировать еще", callback_data="warranty:new")],
         [InlineKeyboardButton(text="🔙 В меню", callback_data="cancel")]
     ])
     
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.message(F.text == "📦 Мои изделия")
 @router.callback_query(F.data == "menu:my_items")

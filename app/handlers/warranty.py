@@ -15,6 +15,7 @@ from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
 from app.utils import upsert_from_user, decode_image, send_cached_photo
 from app.constants import WARRANTY_LEGAL_TEXT
+from app.receipt_parser import parse_receipt_pdf
 
 router = Router()
 
@@ -224,20 +225,52 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
 
 @router.message(WarrantyStates.receipt_data)
 async def warranty_receipt_data_handler(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
-        return
-    
-    receipt_text = message.text
-    # Attempt to extract date from text if possible, otherwise use today
-    # For now, we'll store the whole text as receipt_text and try to find a date
+    receipt_text = None
     receipt_date = None
-    import re
-    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
-    if date_match:
-        receipt_date = date_match.group(1).replace("/", ".")
-    
-    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
+    receipt_file_id = None
+    receipt_items = None
+
+    if message.document or message.photo:
+        file_id = message.document.file_id if message.document else message.photo[-1].file_id
+        receipt_file_id = file_id
+        
+        if message.document and message.document.mime_type == "application/pdf":
+            status_msg = await message.answer("📄 Обрабатываю PDF-чек...")
+            try:
+                file = await message.bot.get_file(file_id)
+                pdf_bytes = io.BytesIO()
+                await message.bot.download_file(file.file_path, destination=pdf_bytes)
+                
+                parsed_items = parse_receipt_pdf(pdf_bytes)
+                if parsed_items:
+                    receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
+                    receipt_text = "Чек распознан из PDF"
+            except Exception as e:
+                logging.error(f"Receipt parse error: {e}")
+            finally:
+                try:
+                    await status_msg.delete()
+                except:
+                    pass
+        else:
+            receipt_text = "Чек получен (фото/файл)"
+            
+    elif message.text:
+        receipt_text = message.text
+        import re
+        date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
+        if date_match:
+            receipt_date = date_match.group(1).replace("/", ".")
+    else:
+        await message.answer("Пожалуйста, введите данные чека текстом или отправьте файл/фото чека.", reply_markup=cancel_kb())
+        return
+
+    await state.update_data(
+        receipt_text=receipt_text, 
+        receipt_date=receipt_date, 
+        receipt_file_id=receipt_file_id,
+        receipt_items=receipt_items
+    )
     
     data = await state.get_data()
     await finalize_warranty(message, state, data["name"])
@@ -253,11 +286,11 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         tg_id=message.from_user.id,
         cz_code=data["cz_code"],
         cz_file_id=data.get("cz_file_id"),
-        receipt_file_id=None,
+        receipt_file_id=data.get("receipt_file_id"),
         sku=data["sku"],
         receipt_date=data.get("receipt_date"),
         receipt_text=data.get("receipt_text"),
-        receipt_items=None
+        receipt_items=data.get("receipt_items")
     )
     
     try:
@@ -267,9 +300,9 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
 
     await message.answer(
         f"✅ Регистрация завершена! Гарантия активирована.\n\n"
-        f"📅 Гарантия действует до: **{display_end_date}**\n\n"
+        f"📅 Гарантия действует до: <b>{display_end_date}</b>\n\n"
         f"{WARRANTY_LEGAL_TEXT}",
         reply_markup=main_menu_kb(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await state.clear()
