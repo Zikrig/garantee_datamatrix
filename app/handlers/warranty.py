@@ -118,11 +118,8 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
     if not data.get("receipt_file_id") and not data.get("no_file"):
         await state.set_state(WarrantyStates.receipt_file)
         await message.answer(
-            "Отправьте файл (PDF) или фото чека с Wildberries.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⏩ Пропустить", callback_data="warranty:skip_file")],
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-            ]),
+            "Отправьте файл (PDF) чека с Wildberries.\n\nТолько файл. Фото нельзя.",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -284,52 +281,80 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
 
 @router.message(WarrantyStates.receipt_file)
 async def warranty_receipt_file_handler(message: Message, state: FSMContext) -> None:
-    receipt_text = None
-    receipt_file_id = None
-    receipt_items = None
-
-    if message.document or message.photo:
-        file_id = message.document.file_id if message.document else message.photo[-1].file_id
-        receipt_file_id = file_id
+    # Проверяем, что это PDF файл, а не фото
+    if message.photo:
+        await message.answer("❌ Фото не принимается. Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
+        return
+    
+    if not message.document:
+        await message.answer("❌ Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
+        return
+    
+    if message.document.mime_type != "application/pdf":
+        await message.answer("❌ Принимаются только PDF файлы. Пожалуйста, отправьте файл PDF чека.", reply_markup=cancel_kb())
+        return
+    
+    file_id = message.document.file_id
+    status_msg = await message.answer("📄 Обрабатываю PDF-чек...")
+    
+    try:
+        file = await message.bot.get_file(file_id)
+        pdf_bytes = io.BytesIO()
+        await message.bot.download_file(file.file_path, destination=pdf_bytes)
+        pdf_bytes.seek(0)
         
-        if message.document and message.document.mime_type == "application/pdf":
-            status_msg = await message.answer("📄 Обрабатываю PDF-чек...")
-            try:
-                file = await message.bot.get_file(file_id)
-                pdf_bytes = io.BytesIO()
-                await message.bot.download_file(file.file_path, destination=pdf_bytes)
-                pdf_bytes.seek(0)
-                
-                parsed_items = parse_receipt_pdf(pdf_bytes)
-                if parsed_items:
-                    receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
-                    receipt_text = "Чек распознан из PDF"
-            except Exception as e:
-                logging.error(f"Receipt parse error: {e}")
-            finally:
-                try:
-                    await status_msg.delete()
-                except:
-                    pass
-        else:
-            receipt_text = "Чек получен (фото/файл)"
+        parsed_items = parse_receipt_pdf(pdf_bytes)
+        if not parsed_items:
+            await message.answer(
+                "❌ Не удалось распознать товары из чека. "
+                "Убедитесь, что файл содержит корректный чек с Wildberries и попробуйте еще раз.",
+                reply_markup=cancel_kb()
+            )
+            return
+        
+        # Проверяем ЧЗ код на вхождение фрагмента из OUR_CODES
+        data = await state.get_data()
+        cz_code = data.get("cz_code")
+        
+        if cz_code:
+            from app.utils import get_ours_tokens
+            tokens = get_ours_tokens()
             
+            if tokens:
+                # Проверяем, содержит ли ЧЗ код хотя бы один фрагмент из OUR_CODES
+                code_valid = any(token in cz_code for token in tokens)
+                
+                if not code_valid:
+                    await message.answer(
+                        "❌ Код Честный знак не относится к нашей продукции. "
+                        "Убедитесь, что вы отправляете чек с Wildberries на покупку наших товаров.",
+                        reply_markup=cancel_kb()
+                    )
+                    return
+        
+        receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
+        receipt_text = "Чек распознан из PDF"
+        
         await state.update_data(
-            receipt_file_id=receipt_file_id,
+            receipt_file_id=file_id,
             receipt_items=receipt_items,
             receipt_text=receipt_text
         )
         user_data = await db.get_user(message.from_user.id)
         await start_next_registration_step(message, state, user_data)
-    else:
-        await message.answer("Пожалуйста, отправьте файл (PDF) или фото чека, либо нажмите «Пропустить».", reply_markup=cancel_kb())
+    except Exception as e:
+        logging.error(f"Receipt parse error: {e}")
+        await message.answer(
+            "❌ Произошла ошибка при обработке чека. Пожалуйста, попробуйте еще раз.",
+            reply_markup=cancel_kb()
+        )
+    finally:
+        try:
+            await status_msg.delete()
+        except:
+            pass
 
-@router.callback_query(F.data == "warranty:skip_file")
-async def warranty_skip_file_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.update_data(no_file=True)
-    user_data = await db.get_user(callback.from_user.id)
-    await start_next_registration_step(callback.message, state, user_data)
+# Убрана возможность пропустить загрузку чека
 
 @router.message(WarrantyStates.receipt_text)
 async def warranty_receipt_text_handler(message: Message, state: FSMContext) -> None:

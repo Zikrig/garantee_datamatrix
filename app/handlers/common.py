@@ -7,8 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.db import Database
-from app.utils import upsert_from_user, load_kb, DEFAULT_KB
+from app.utils import upsert_from_user, load_kb, DEFAULT_KB, get_ours_tokens
 from app.keyboards import main_menu_kb, cancel_kb, claims_list_kb
+from app.states import CheckZnackStates
 from app.constants import CARE_TEXT, TRUST_TEXT, FAQ_ITEMS
 
 router = Router()
@@ -147,4 +148,55 @@ async def faq_callback_handler(callback: CallbackQuery) -> None:
     rows = [[InlineKeyboardButton(text=l["label"], url=l["url"])] for l in links]
     rows.append([InlineKeyboardButton(text="Задать вопрос", callback_data="faq:ask")])
     await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+@router.message(Command("check_znack"))
+async def check_znack_start_handler(message: Message, state: FSMContext) -> None:
+    await upsert_from_user(db, message.from_user)
+    await state.set_state(CheckZnackStates.waiting_for_code)
+    await message.answer(
+        "🔍 Проверка кода Честный знак\n\n"
+        "Введите код для проверки:",
+        reply_markup=cancel_kb()
+    )
+
+@router.message(CheckZnackStates.waiting_for_code)
+async def check_znack_code_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
+        return
+    
+    code = message.text.strip()
+    tokens = get_ours_tokens()
+    
+    if not tokens:
+        await message.answer(
+            "⚠️ Список кодов OUR_CODES не настроен. Обратитесь к администратору.",
+            reply_markup=main_menu_kb()
+        )
+        await state.clear()
+        return
+    
+    # Проверяем, содержит ли код хотя бы один фрагмент из OUR_CODES
+    code_valid = any(token in code for token in tokens)
+    
+    if code_valid:
+        matched_tokens = [token for token in tokens if token in code]
+        matched_text = ", ".join(matched_tokens)
+        await message.answer(
+            f"✅ <b>Код соответствует нашей продукции!</b>\n\n"
+            f"Найденные фрагменты: <code>{escape(matched_text)}</code>\n"
+            f"Проверенный код: <code>{escape(code)}</code>",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(
+            f"❌ <b>Код не относится к нашей продукции.</b>\n\n"
+            f"Проверенный код: <code>{escape(code)}</code>\n\n"
+            f"Убедитесь, что вы ввели правильный код Честный знак.",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+    
+    await state.clear()
 

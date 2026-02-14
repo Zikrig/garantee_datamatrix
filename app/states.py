@@ -32,3 +32,6 @@ class WarrantyStates(StatesGroup):
     receipt_file = State()
     receipt_text = State()
 
+class CheckZnackStates(StatesGroup):
+    waiting_for_code = State()
+
