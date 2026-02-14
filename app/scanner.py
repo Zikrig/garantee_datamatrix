@@ -122,3 +122,6 @@ def extract_datamatrix(image_bytes: bytes) -> list[str]:
 
 
 
+
+
+

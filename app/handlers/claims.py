@@ -17,7 +17,7 @@ from app.keyboards import (
     main_menu_kb, cancel_kb, purchase_type_kb, files_kb, 
     skip_kb, warranties_selection_kb, claim_status_kb
 )
-from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim
+from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim, send_cached_photo
 from app.receipt_parser import ReceiptParser, render_items
 
 router = Router()
@@ -82,10 +82,14 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
             [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
             [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
         ])
-        await callback.message.answer(
-            "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
-            "Отправьте фото кода Честный знак.",
-            reply_markup=kb,
+        await send_cached_photo(
+            callback.message.bot, 
+            db, 
+            callback.message.chat.id, 
+            "data/images/chz.png",
+            "Чтобы получить расширенную гарантию, \n"
+            "Отправьте фото кода честный знак с этикетки товара.",
+            reply_markup=kb
         )
         return
 
@@ -109,7 +113,11 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
 async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ClaimStates.purchase_cz_text)
-    await callback.message.answer(
+    await send_cached_photo(
+        callback.message.bot,
+        db,
+        callback.message.chat.id,
+        "data/images/chz_code.png",
         "Введите код Честный знак вручную.\n\n"
         "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
         "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
@@ -160,7 +168,11 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
         
         if failures >= 2:
             await state.set_state(ClaimStates.purchase_cz_text)
-            await message.answer(
+            await send_cached_photo(
+                message.bot,
+                db,
+                message.chat.id,
+                "data/images/chz_code.png",
                 "⚠️ Не удалось распознать фото.\n\n"
                 "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
                 "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
@@ -258,7 +270,7 @@ async def claim_purchase_receipt_handler(message: Message, state: FSMContext) ->
     await state.set_state(ClaimStates.purchase_sku)
     await message.answer(
         "Чек получен! ✅\n"
-        "Теперь введите артикул товара.",
+        "Теперь введите артикул товара. Он находится на том же ярлычке, что и ЧЗ, который вы ввели ранее.",
         reply_markup=cancel_kb(),
     )
 
@@ -293,8 +305,9 @@ async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> Non
     
     await state.set_state(ClaimStates.description)
     await message.answer(
-        f"Изделие '{sku}' успешно зарегистрировано! ✅\n\n"
-        "Теперь опишите ситуацию по этому изделию текстом.",
+        f"Чек получен! ✅\n"
+        f"Изделие '{sku}' успешно зарегистрировано.\n\n"
+        "Опишите ситуацию по этому изделию текстом.",
         reply_markup=cancel_kb(),
     )
 
@@ -304,11 +317,7 @@ async def claim_description_handler(message: Message, state: FSMContext) -> None
     await state.set_state(ClaimStates.files)
     await state.update_data(files=[])
     
-    data = await state.get_data()
-    sku = data.get("sku") or "Изделие"
-    
     await message.answer(
-        f"Выбрано изделие: {sku}\n"
         "Пришлите фото/видео неисправности (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
         reply_markup=files_kb(),
     )

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from aiogram import Bot
+from aiogram.types import FSInputFile
 from app.scanner import extract_datamatrix
 from app.constants import CARE_TEXT, TRUST_TEXT
 
@@ -78,6 +79,33 @@ async def decode_image(bytes_data: bytes) -> tuple[list[str], bool]:
 
 async def upsert_from_user(db, user) -> None:
     await db.upsert_user(user.id, user.username, None)
+
+async def send_cached_photo(bot: Bot, db, chat_id: int, photo_path: str, caption: str, reply_markup=None, parse_mode=None) -> None:
+    cache_key = f"file_id:{photo_path}"
+    file_id = await db.get_setting(cache_key)
+    
+    if file_id:
+        try:
+            await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
+            return
+        except Exception as e:
+            logging.warning(f"Failed to send cached photo {photo_path}: {e}")
+            # If failed, try re-uploading
+    
+    if not os.path.exists(photo_path):
+        logging.error(f"Photo file not found: {photo_path}")
+        await bot.send_message(chat_id, caption, reply_markup=reply_markup, parse_mode=parse_mode)
+        return
+
+    try:
+        photo = FSInputFile(photo_path)
+        msg = await bot.send_photo(chat_id, photo, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
+        if msg.photo:
+            new_file_id = msg.photo[-1].file_id
+            await db.set_setting(cache_key, new_file_id)
+    except Exception as e:
+        logging.error(f"Failed to send/upload photo {photo_path}: {e}")
+        await bot.send_message(chat_id, caption, reply_markup=reply_markup, parse_mode=parse_mode)
 
 async def get_or_create_user_thread(bot: Bot, db, user_id: int) -> int | None:
     user = await db.get_user(user_id)

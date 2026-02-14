@@ -13,7 +13,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from app.database import db
 from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
-from app.utils import upsert_from_user, decode_image
+from app.utils import upsert_from_user, decode_image, send_cached_photo
 from app.constants import WARRANTY_LEGAL_TEXT
 from app.receipt_parser import ReceiptParser, render_items
 
@@ -27,7 +27,11 @@ async def start_warranty_activation(message: Message, state: FSMContext) -> None
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
     ])
     
-    await message.answer(
+    await send_cached_photo(
+        message.bot, 
+        db, 
+        message.chat.id, 
+        "data/images/chz.png",
         "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
         "Отправьте фото кода Честный знак.",
         reply_markup=kb,
@@ -66,7 +70,11 @@ async def warranty_new_callback_handler(callback: CallbackQuery, state: FSMConte
 async def warranty_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(WarrantyStates.cz_text)
-    await callback.message.answer(
+    await send_cached_photo(
+        callback.message.bot,
+        db,
+        callback.message.chat.id,
+        "data/images/chz_code.png",
         "Введите код Честный знак вручную.\n\n"
         "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
         "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
@@ -117,7 +125,11 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         
         if failures >= 2:
             await state.set_state(WarrantyStates.cz_text)
-            await message.answer(
+            await send_cached_photo(
+                message.bot,
+                db,
+                message.chat.id,
+                "data/images/chz_code.png",
                 "⚠️ Не удалось распознать фото.\n\n"
                 "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
                 "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
@@ -215,7 +227,7 @@ async def warranty_receipt_handler(message: Message, state: FSMContext) -> None:
     await state.set_state(WarrantyStates.sku)
     await message.answer(
         "Чек получен! ✅\n"
-        "Теперь введите артикул товара.",
+        "Теперь введите артикул товара.  Он находится на том же ярлычке, что и ЧЗ, который вы ввели ранее.",
         reply_markup=cancel_kb(),
     )
 
