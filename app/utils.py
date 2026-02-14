@@ -138,11 +138,10 @@ async def send_admin_claim(
     from app.keyboards import claim_status_kb
 
     products_info = ""
-    if "из гарантии" in claim['purchase_type']:
-        warranties = await db.get_warranties(claim['tg_id'])
-        w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
-        if w and w.get('receipt_items'):
-            products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
+    warranties = await db.get_warranties(claim['tg_id'])
+    w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
+    if w and w.get('receipt_items'):
+        products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
 
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:

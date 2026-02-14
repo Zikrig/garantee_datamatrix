@@ -266,7 +266,7 @@ async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> Non
     await state.update_data(sku=sku)
     await state.set_state(ClaimStates.purchase_receipt_pdf)
     await message.answer(
-        "Введите дату чека с ВБ и его номер.\n\n"
+        "Введите дату чека с ВБ и его номер или отправьте файл (PDF) / фото чека.\n\n"
         "Инструкция: зайти в свой профиль на ВБ - оплата - чеки",
         reply_markup=cancel_kb(),
     )
@@ -288,6 +288,7 @@ async def claim_purchase_receipt_handler(message: Message, state: FSMContext) ->
                 file = await message.bot.get_file(file_id)
                 pdf_bytes = io.BytesIO()
                 await message.bot.download_file(file.file_path, destination=pdf_bytes)
+                pdf_bytes.seek(0)
                 
                 parsed_items = parse_receipt_pdf(pdf_bytes)
                 if parsed_items:

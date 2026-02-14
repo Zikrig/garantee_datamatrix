@@ -139,11 +139,10 @@ async def claim_details_handler(callback: CallbackQuery) -> None:
         return
     
     products_info = ""
-    if "из гарантии" in claim['purchase_type']:
-        warranties = await db.get_warranties(claim['tg_id'])
-        w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
-        if w and w.get('receipt_items'):
-            products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
+    warranties = await db.get_warranties(claim['tg_id'])
+    w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
+    if w and w.get('receipt_items'):
+        products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
 
     text = (
         f"🛠 <b>Заявка {escape(claim['id'])}</b>\n"

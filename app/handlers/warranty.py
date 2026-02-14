@@ -218,7 +218,7 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
     await state.update_data(sku=message.text)
     await state.set_state(WarrantyStates.receipt_data)
     await message.answer(
-        "Введите дату чека с ВБ и его номер.\n\n"
+        "Введите дату чека с ВБ и его номер или отправьте файл (PDF) / фото чека.\n\n"
         "Инструкция: зайти в свой профиль на ВБ - оплата - чеки.",
         reply_markup=cancel_kb(),
     )
@@ -240,6 +240,7 @@ async def warranty_receipt_data_handler(message: Message, state: FSMContext) -> 
                 file = await message.bot.get_file(file_id)
                 pdf_bytes = io.BytesIO()
                 await message.bot.download_file(file.file_path, destination=pdf_bytes)
+                pdf_bytes.seek(0)
                 
                 parsed_items = parse_receipt_pdf(pdf_bytes)
                 if parsed_items:
