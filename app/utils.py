@@ -182,8 +182,10 @@ async def send_admin_claim(
         return
 
     group_id = int(group_id_str)
+    logging.info(f"Sending claim to group {group_id} topic {claim['tg_id']}")
     thread_id = await get_or_create_user_thread(bot, db, claim["tg_id"])
     if not thread_id:
+        logging.error(f"Failed to create/get thread for user {claim['tg_id']}")
         return
 
     text = (

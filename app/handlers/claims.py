@@ -73,6 +73,96 @@ async def claim_start_callback_handler(callback: CallbackQuery, state: FSMContex
         reply_markup=warranties_selection_kb(warranties)
     )
 
+async def start_next_claim_reg_step(message: Message, state: FSMContext, user_data: dict) -> None:
+    data = await state.get_data()
+
+    # Determine which contact info is missing
+    missing_name = not user_data.get("name") and not data.get("name")
+    missing_phone = not user_data.get("phone") and not data.get("phone")
+    missing_email = not user_data.get("email") and not data.get("email")
+
+    if missing_name:
+        await state.set_state(ClaimStates.contact_name)
+        await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+        return
+
+    if missing_phone:
+        await state.set_state(ClaimStates.contact_phone)
+        await message.answer("Введите ваш номер телефона.", reply_markup=cancel_kb())
+        return
+
+    if missing_email:
+        await state.set_state(ClaimStates.purchase_email)
+        await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
+        return
+
+    # If all contact info is present, move to SKU
+    if not data.get("sku"):
+        await state.set_state(ClaimStates.purchase_sku)
+        await message.answer(
+            "введите артикул товара – это цифры с этикетки за словом «Артикул»",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    # If SKU is present, move to Receipt File
+    if not data.get("receipt_file_id") and not data.get("no_file"):
+        await state.set_state(ClaimStates.purchase_receipt_file)
+        await message.answer(
+            "Отправьте файл (PDF) или фото чека с Wildberries.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏩ Пропустить", callback_data="claim:skip_file")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+            ]),
+        )
+        return
+
+    # If Receipt File is handled, move to Receipt Text
+    if not data.get("receipt_text"):
+        await state.set_state(ClaimStates.purchase_receipt_text)
+        await message.answer(
+            "Введите дату чека с ВБ и его номер.\n\n"
+            "Инструкция: зайти в свой профиль на ВБ - оплата - чеки",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    # Once item is registered, move to problem description
+    # Save as warranty first
+    warranty_id = uuid.uuid4().hex[:8]
+    await db.create_warranty(
+        warranty_id=warranty_id,
+        tg_id=message.from_user.id,
+        cz_code=data["cz_code"],
+        cz_file_id=data.get("cz_file_id"),
+        receipt_file_id=data.get("receipt_file_id"),
+        sku=data["sku"],
+        receipt_date=data.get("receipt_date"),
+        receipt_text=data.get("receipt_text"),
+        receipt_items=data.get("receipt_items")
+    )
+    
+    # Update user data if we collected new info
+    if data.get("name") or data.get("phone") or data.get("email"):
+        await db.upsert_user(message.from_user.id, message.from_user.username, data.get("name"))
+        if data.get("phone"):
+            await db.update_user_phone(message.from_user.id, data["phone"])
+        if data.get("email"):
+            await db.update_user_email(message.from_user.id, data["email"])
+
+    await state.update_data(
+        purchase_type="ЧЗ (новая гарантия)", 
+        purchase_value=data["cz_code"]
+    )
+    
+    await state.set_state(ClaimStates.description)
+    await message.answer(
+        f"✅ Изделие <b>{escape(data['sku'])}</b> успешно зарегистрировано.\n\n"
+        "Опишите ситуацию по этому изделию текстом.",
+        reply_markup=cancel_kb(),
+        parse_mode="HTML"
+    )
+
 @router.callback_query(F.data.startswith("select_w:"), ClaimStates.purchase_type)
 async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -107,6 +197,13 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
         purchase_value=selected["cz_code"], 
         sku=selected.get("sku")
     )
+    
+    # Check if contact info is complete before moving to description
+    user_db = await db.get_user(callback.from_user.id)
+    if not user_db.get("name") or not user_db.get("phone") or not user_db.get("email"):
+        await start_next_claim_reg_step(callback.message, state, user_db)
+        return
+
     await state.set_state(ClaimStates.description)
     await callback.message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
 
@@ -204,8 +301,8 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
         return
 
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
-    await state.set_state(ClaimStates.contact_name)
-    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
 @router.message(ClaimStates.purchase_cz_text)
 async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) -> None:
@@ -228,8 +325,8 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
         return
 
     await state.update_data(cz_code=cz_code, cz_file_id=None)
-    await state.set_state(ClaimStates.contact_name)
-    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
 @router.message(ClaimStates.contact_name)
 async def claim_contact_name_handler(message: Message, state: FSMContext) -> None:
@@ -237,8 +334,17 @@ async def claim_contact_name_handler(message: Message, state: FSMContext) -> Non
         await message.answer("Пожалуйста, введите ваше имя текстом.", reply_markup=cancel_kb())
         return
     await state.update_data(name=message.text)
-    await state.set_state(ClaimStates.purchase_email)
-    await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
+
+@router.message(ClaimStates.contact_phone)
+async def claim_contact_phone_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите ваш номер телефона текстом.", reply_markup=cancel_kb())
+        return
+    await state.update_data(phone=message.text)
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
 @router.message(ClaimStates.purchase_email)
 async def claim_purchase_email_handler(message: Message, state: FSMContext) -> None:
@@ -247,14 +353,9 @@ async def claim_purchase_email_handler(message: Message, state: FSMContext) -> N
         return
     
     email = message.text.strip().lower()
-    await db.update_user_email(message.from_user.id, email)
     await state.update_data(email=email)
-    
-    await state.set_state(ClaimStates.purchase_sku)
-    await message.answer(
-        "введите артикул товара – это цифры с этикетки за словом «Артикул»",
-        reply_markup=cancel_kb(),
-    )
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
 @router.message(ClaimStates.purchase_sku)
 async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> None:
@@ -264,17 +365,12 @@ async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> Non
     
     sku = message.text
     await state.update_data(sku=sku)
-    await state.set_state(ClaimStates.purchase_receipt_pdf)
-    await message.answer(
-        "Введите дату чека с ВБ и его номер или отправьте файл (PDF) / фото чека.\n\n"
-        "Инструкция: зайти в свой профиль на ВБ - оплата - чеки",
-        reply_markup=cancel_kb(),
-    )
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
-@router.message(ClaimStates.purchase_receipt_pdf)
-async def claim_purchase_receipt_handler(message: Message, state: FSMContext) -> None:
+@router.message(ClaimStates.purchase_receipt_file)
+async def claim_purchase_receipt_file_handler(message: Message, state: FSMContext) -> None:
     receipt_text = None
-    receipt_date = None
     receipt_file_id = None
     receipt_items = None
 
@@ -304,50 +400,39 @@ async def claim_purchase_receipt_handler(message: Message, state: FSMContext) ->
         else:
             receipt_text = "Чек получен (фото/файл)"
             
-    elif message.text:
-        receipt_text = message.text
-        import re
-        date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
-        if date_match:
-            receipt_date = date_match.group(1).replace("/", ".")
+        await state.update_data(
+            receipt_file_id=receipt_file_id,
+            receipt_items=receipt_items,
+            receipt_text=receipt_text
+        )
+        user_data = await db.get_user(message.from_user.id)
+        await start_next_claim_reg_step(message, state, user_data)
     else:
-        await message.answer("Пожалуйста, введите данные чека текстом или отправьте файл/фото чека.", reply_markup=cancel_kb())
-        return
+        await message.answer("Пожалуйста, отправьте файл (PDF) или фото чека, либо нажмите «Пропустить».", reply_markup=cancel_kb())
 
-    await state.update_data(
-        receipt_text=receipt_text, 
-        receipt_date=receipt_date, 
-        receipt_file_id=receipt_file_id,
-        receipt_items=receipt_items
-    )
+@router.callback_query(F.data == "claim:skip_file")
+async def claim_skip_file_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.update_data(no_file=True)
+    user_data = await db.get_user(callback.from_user.id)
+    await start_next_claim_reg_step(callback.message, state, user_data)
+
+@router.message(ClaimStates.purchase_receipt_text)
+async def claim_purchase_receipt_text_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
+        return
     
-    # Save as warranty first
-    data = await state.get_data()
-    warranty_id = uuid.uuid4().hex[:8]
-    await db.create_warranty(
-        warranty_id=warranty_id,
-        tg_id=message.from_user.id,
-        cz_code=data["cz_code"],
-        cz_file_id=data.get("cz_file_id"),
-        receipt_file_id=receipt_file_id,
-        sku=data["sku"],
-        receipt_date=receipt_date,
-        receipt_text=receipt_text,
-        receipt_items=receipt_items
-    )
+    receipt_text = message.text
+    receipt_date = None
+    import re
+    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
+    if date_match:
+        receipt_date = date_match.group(1).replace("/", ".")
     
-    await state.update_data(
-        purchase_type="ЧЗ (новая гарантия)", 
-        purchase_value=data["cz_code"]
-    )
-    
-    await state.set_state(ClaimStates.description)
-    await message.answer(
-        f"✅ Изделие <b>{escape(data['sku'])}</b> успешно зарегистрировано.\n\n"
-        "Опишите ситуацию по этому изделию текстом.",
-        reply_markup=cancel_kb(),
-        parse_mode="HTML"
-    )
+    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_claim_reg_step(message, state, user_data)
 
 @router.message(ClaimStates.description)
 async def claim_description_handler(message: Message, state: FSMContext) -> None:
@@ -393,28 +478,12 @@ async def claim_files_handler(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data == "files:done", ClaimStates.files)
 async def claim_files_done_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    user_db = await db.get_user(callback.from_user.id)
-    if user_db and user_db.get("phone"):
-        await finalize_claim(callback.message, state, callback.from_user, phone=user_db["phone"])
-    else:
-        await state.set_state(ClaimStates.contact_phone)
-        await callback.message.answer("Введите телефон (или нажмите “Пропустить”).", reply_markup=skip_kb())
+    await finalize_claim(callback.message, state, callback.from_user)
 
-@router.message(ClaimStates.contact_phone)
-async def claim_contact_phone_handler(message: Message, state: FSMContext) -> None:
-    await finalize_claim(message, state, message.from_user, phone=message.text)
-
-@router.callback_query(F.data == "skip:phone", ClaimStates.contact_phone)
-async def claim_skip_phone_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await finalize_claim(callback.message, state, callback.from_user, phone=None)
-
-async def finalize_claim(message: Message, state: FSMContext, user: Any, phone: str | None) -> None:
-    if phone:
-        await db.update_user_phone(user.id, phone)
-
+async def finalize_claim(message: Message, state: FSMContext, user: Any) -> None:
     data = await state.get_data()
     claim_id = uuid.uuid4().hex[:8]
+    
     await db.create_claim(
         claim_id=claim_id,
         tg_id=user.id,
@@ -429,6 +498,8 @@ async def finalize_claim(message: Message, state: FSMContext, user: Any, phone: 
     user_db = await db.get_user(user.id)
     claim = await db.get_claim(claim_id)
     files = await db.get_claim_files(claim_id)
+    
+    # Send to admins/group
     await send_admin_claim(
         message.bot,
         db,

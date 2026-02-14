@@ -80,6 +80,65 @@ async def warranty_cz_text_start_handler(callback: CallbackQuery, state: FSMCont
         reply_markup=cancel_kb()
     )
 
+async def start_next_registration_step(message: Message, state: FSMContext, user_data: dict) -> None:
+    current_state = await state.get_state()
+    data = await state.get_data()
+
+    # Determine which contact info is missing
+    missing_name = not user_data.get("name") and not data.get("name")
+    missing_phone = not user_data.get("phone") and not data.get("phone")
+    missing_email = not user_data.get("email") and not data.get("email")
+
+    if missing_name:
+        await state.set_state(WarrantyStates.name)
+        await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+        return
+
+    if missing_phone:
+        await state.set_state(WarrantyStates.phone)
+        await message.answer("Введите ваш номер телефона.", reply_markup=cancel_kb())
+        return
+
+    if missing_email:
+        await state.set_state(WarrantyStates.email)
+        await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
+        return
+
+    # If all contact info is present, move to SKU
+    if current_state in [WarrantyStates.cz_photo, WarrantyStates.cz_text, WarrantyStates.name, WarrantyStates.phone, WarrantyStates.email]:
+        if not data.get("sku"):
+            await state.set_state(WarrantyStates.sku)
+            await message.answer(
+                "введите артикул товара – это цифры с этикетки за словом «Артикул»",
+                reply_markup=cancel_kb(),
+            )
+            return
+
+    # If SKU is present, move to Receipt File
+    if not data.get("receipt_file_id") and not data.get("no_file"):
+        await state.set_state(WarrantyStates.receipt_file)
+        await message.answer(
+            "Отправьте файл (PDF) или фото чека с Wildberries.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⏩ Пропустить", callback_data="warranty:skip_file")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+            ]),
+        )
+        return
+
+    # If Receipt File is handled, move to Receipt Text
+    if not data.get("receipt_text"):
+        await state.set_state(WarrantyStates.receipt_text)
+        await message.answer(
+            "Введите дату чека с ВБ и его номер.\n\n"
+            "Инструкция: зайти в свой профиль на ВБ - оплата - чеки.",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    # If everything is done, finalize
+    await finalize_warranty(message, state, data.get("name") or user_data.get("name"))
+
 @router.message(WarrantyStates.cz_photo)
 async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
     photo = message.photo[-1] if message.photo else None
@@ -158,8 +217,8 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
-    await state.set_state(WarrantyStates.name)
-    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 @router.message(WarrantyStates.cz_text)
 async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
@@ -181,8 +240,8 @@ async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(cz_code=cz_code, cz_file_id=None)
-    await state.set_state(WarrantyStates.name)
-    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 @router.message(WarrantyStates.name)
 async def warranty_name_handler(message: Message, state: FSMContext) -> None:
@@ -190,8 +249,17 @@ async def warranty_name_handler(message: Message, state: FSMContext) -> None:
         await message.answer("Пожалуйста, введите ваше имя текстом.", reply_markup=cancel_kb())
         return
     await state.update_data(name=message.text)
-    await state.set_state(WarrantyStates.email)
-    await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
+
+@router.message(WarrantyStates.phone)
+async def warranty_phone_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите ваш номер телефона текстом.", reply_markup=cancel_kb())
+        return
+    await state.update_data(phone=message.text)
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 @router.message(WarrantyStates.email)
 async def warranty_email_handler(message: Message, state: FSMContext) -> None:
@@ -200,14 +268,9 @@ async def warranty_email_handler(message: Message, state: FSMContext) -> None:
         return
     
     email = message.text.strip().lower()
-    await db.update_user_email(message.from_user.id, email)
     await state.update_data(email=email)
-    
-    await state.set_state(WarrantyStates.sku)
-    await message.answer(
-        "введите артикул товара – это цифры с этикетки за словом «Артикул»",
-        reply_markup=cancel_kb(),
-    )
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 @router.message(WarrantyStates.sku)
 async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
@@ -216,17 +279,12 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
         return
     
     await state.update_data(sku=message.text)
-    await state.set_state(WarrantyStates.receipt_data)
-    await message.answer(
-        "Введите дату чека с ВБ и его номер или отправьте файл (PDF) / фото чека.\n\n"
-        "Инструкция: зайти в свой профиль на ВБ - оплата - чеки.",
-        reply_markup=cancel_kb(),
-    )
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
-@router.message(WarrantyStates.receipt_data)
-async def warranty_receipt_data_handler(message: Message, state: FSMContext) -> None:
+@router.message(WarrantyStates.receipt_file)
+async def warranty_receipt_file_handler(message: Message, state: FSMContext) -> None:
     receipt_text = None
-    receipt_date = None
     receipt_file_id = None
     receipt_items = None
 
@@ -256,32 +314,52 @@ async def warranty_receipt_data_handler(message: Message, state: FSMContext) -> 
         else:
             receipt_text = "Чек получен (фото/файл)"
             
-    elif message.text:
-        receipt_text = message.text
-        import re
-        date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
-        if date_match:
-            receipt_date = date_match.group(1).replace("/", ".")
+        await state.update_data(
+            receipt_file_id=receipt_file_id,
+            receipt_items=receipt_items,
+            receipt_text=receipt_text
+        )
+        user_data = await db.get_user(message.from_user.id)
+        await start_next_registration_step(message, state, user_data)
     else:
-        await message.answer("Пожалуйста, введите данные чека текстом или отправьте файл/фото чека.", reply_markup=cancel_kb())
-        return
+        await message.answer("Пожалуйста, отправьте файл (PDF) или фото чека, либо нажмите «Пропустить».", reply_markup=cancel_kb())
 
-    await state.update_data(
-        receipt_text=receipt_text, 
-        receipt_date=receipt_date, 
-        receipt_file_id=receipt_file_id,
-        receipt_items=receipt_items
-    )
+@router.callback_query(F.data == "warranty:skip_file")
+async def warranty_skip_file_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.update_data(no_file=True)
+    user_data = await db.get_user(callback.from_user.id)
+    await start_next_registration_step(callback.message, state, user_data)
+
+@router.message(WarrantyStates.receipt_text)
+async def warranty_receipt_text_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
+        return
     
-    data = await state.get_data()
-    await finalize_warranty(message, state, data["name"])
+    receipt_text = message.text
+    receipt_date = None
+    import re
+    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
+    if date_match:
+        receipt_date = date_match.group(1).replace("/", ".")
+    
+    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 async def finalize_warranty(message: Message, state: FSMContext, name: str) -> None:
     data = await state.get_data()
     warranty_id = uuid.uuid4().hex[:8]
     
-    await db.upsert_user(message.from_user.id, message.from_user.username, name)
-    
+    # Update user contact info in DB if it was just collected
+    if data.get("name") or data.get("phone") or data.get("email"):
+        await db.upsert_user(message.from_user.id, message.from_user.username, data.get("name"))
+        if data.get("phone"):
+            await db.update_user_phone(message.from_user.id, data["phone"])
+        if data.get("email"):
+            await db.update_user_email(message.from_user.id, data["email"])
+
     start_date, end_date = await db.create_warranty(
         warranty_id=warranty_id,
         tg_id=message.from_user.id,
