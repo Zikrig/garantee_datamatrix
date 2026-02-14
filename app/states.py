@@ -4,6 +4,7 @@ class ClaimStates(StatesGroup):
     purchase_type = State()
     purchase_cz_photo = State()
     purchase_cz_text = State()
+    purchase_email = State()
     purchase_receipt_pdf = State()
     purchase_sku = State()
     description = State()
@@ -23,7 +24,8 @@ class AdminStates(StatesGroup):
 class WarrantyStates(StatesGroup):
     cz_photo = State()
     cz_text = State()
-    receipt_pdf = State()
-    sku = State()
     name = State()
+    email = State()
+    sku = State()
+    receipt_data = State()
 

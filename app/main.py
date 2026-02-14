@@ -7,6 +7,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.database import db
 from app.handlers import common, admin, warranty, claims, kb_admin, communication, unexpected
+from app.sheets import sheets_sync_scheduler
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
@@ -37,6 +38,9 @@ async def main() -> None:
     
     # 5. Unexpected/Catch-all (at the very end)
     dp.include_router(unexpected.router)
+
+    # Start Google Sheets sync in background
+    asyncio.create_task(sheets_sync_scheduler())
 
     logging.info("Bot started polling")
     await dp.start_polling(bot)

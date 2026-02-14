@@ -132,7 +132,7 @@ async def get_or_create_user_thread(bot: Bot, db, user_id: int) -> int | None:
         return None
 
 async def send_admin_claim(
-    bot: Bot, db, claim: dict, files: list[dict], username: str | None, name: str | None, phone: str | None
+    bot: Bot, db, claim: dict, files: list[dict], username: str | None, name: str | None, phone: str | None, email: str | None = None
 ) -> None:
     from app.keyboards import claim_status_kb
 
@@ -155,6 +155,7 @@ async def send_admin_claim(
             f"tg: {claim['tg_id']} @{username or '-'}\n"
             f"имя: {name or '-'}\n"
             f"телефон: {phone or '-'}\n"
+            f"email: {email or '-'}\n"
             f"идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
             f"{products_info}\n"
             f"текст: {claim['description']}\n"
@@ -189,6 +190,10 @@ async def send_admin_claim(
         "🛠 **Новая заявка**\n"
         f"ID: `{claim['id']}`\n"
         f"Дата: {claim['created_at']}\n"
+        f"Пользователь: @{username or '-'}\n"
+        f"Имя: {name or '-'}\n"
+        f"Телефон: {phone or '-'}\n"
+        f"Email: {email or '-'}\n"
         f"Идентификатор: {claim['purchase_type']} / {claim['purchase_value']}\n"
         f"{products_info}\n"
         f"**Текст проблемы:**\n{claim['description']}"

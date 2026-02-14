@@ -15,7 +15,6 @@ from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
 from app.utils import upsert_from_user, decode_image, send_cached_photo
 from app.constants import WARRANTY_LEGAL_TEXT
-from app.receipt_parser import ReceiptParser, render_items
 
 router = Router()
 
@@ -33,17 +32,16 @@ async def start_warranty_activation(message: Message, state: FSMContext) -> None
         message.chat.id, 
         "data/images/chz.png",
         "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
-        "Отправьте фото кода Честный знак.",
+        "Отправьте фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК».",
         reply_markup=kb,
     )
 
-@router.message(F.text == "🔐 Получить гарантию")
+@router.message(F.text == "🔐 Активировать гарантию 12 месяцев")
 @router.message(Command("warranty"))
 async def warranty_start_handler(message: Message, state: FSMContext) -> None:
     await upsert_from_user(db, message.from_user)
     warranties = await db.get_warranties(message.from_user.id)
     if warranties:
-        # Import here to avoid circular
         from app.handlers.common import show_user_warranties
         await show_user_warranties(message, message.from_user.id)
     else:
@@ -90,7 +88,7 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
     failures = data.get("cz_failures", 0)
 
     if not photo and not document:
-        await message.answer("Нужна фотография Честного знака или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+        await message.answer("Нужна фотография бирки изделия или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
             [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
         ]))
@@ -131,8 +129,7 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
                 message.chat.id,
                 "data/images/chz_code.png",
                 "⚠️ Не удалось распознать фото.\n\n"
-                "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
-                "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
+                "Введите ЦИФРОВУЮ часть кода ЧЗ вручную - первые символы, обычно их от 12 до 20.",
                 reply_markup=cancel_kb()
             )
             return
@@ -151,13 +148,17 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         return
 
     cz_code = codes[0]
+    if await db.is_cz_registered(cz_code):
+        await message.answer(
+            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
+            "Повторная регистрация одного и того же изделия невозможна.",
+            reply_markup=cancel_kb()
+        )
+        return
+
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
-    await state.set_state(WarrantyStates.receipt_pdf)
-    await message.answer(
-        "Код принят! ✅\n"
-        "Теперь, пожалуйста, отправьте чек с WB в формате PDF.",
-        reply_markup=cancel_kb(),
-    )
+    await state.set_state(WarrantyStates.name)
+    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
 
 @router.message(WarrantyStates.cz_text)
 async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
@@ -166,68 +167,44 @@ async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
         return
     
     cz_code = message.text.strip()
+    if await db.is_cz_registered(cz_code):
+        await message.answer(
+            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
+            "Повторная регистрация одного и того же изделия невозможна.",
+            reply_markup=cancel_kb()
+        )
+        return
+
     if len(cz_code) < 10:
         await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
         return
 
     await state.update_data(cz_code=cz_code, cz_file_id=None)
-    await state.set_state(WarrantyStates.receipt_pdf)
-    await message.answer(
-        "Код принят! ✅\n"
-        "Теперь, пожалуйста, отправьте чек с WB в формате PDF.",
-        reply_markup=cancel_kb(),
-    )
+    await state.set_state(WarrantyStates.name)
+    await message.answer("Как к вам обращаться?", reply_markup=cancel_kb())
 
-@router.message(WarrantyStates.receipt_pdf, F.document)
-async def warranty_receipt_handler(message: Message, state: FSMContext) -> None:
-    if not message.document or not message.document.file_name.lower().endswith(".pdf"):
-        await message.answer("Пожалуйста, отправьте чек в формате PDF.", reply_markup=cancel_kb())
+@router.message(WarrantyStates.name)
+async def warranty_name_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите ваше имя текстом.", reply_markup=cancel_kb())
         return
+    await state.update_data(name=message.text)
+    await state.set_state(WarrantyStates.email)
+    await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
 
-    file_id = message.document.file_id
-    status_msg = await message.answer("📄 Обрабатываю чек... Это займет мгновение.")
+@router.message(WarrantyStates.email)
+async def warranty_email_handler(message: Message, state: FSMContext) -> None:
+    if not message.text or "@" not in message.text or "." not in message.text:
+        await message.answer("Пожалуйста, введите корректный адрес электронной почты.", reply_markup=cancel_kb())
+        return
     
-    try:
-        file = await message.bot.get_file(file_id)
-        os.makedirs("data", exist_ok=True)
-        temp_path = f"data/temp_{file_id}.pdf"
-        
-        try:
-            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=temp_path), timeout=60)
-        except asyncio.TimeoutError:
-            await message.answer("⚠️ Ошибка: Файл слишком долго загружается. Попробуйте еще раз.", reply_markup=cancel_kb())
-            return
-        
-        receipt_date = None
-        receipt_text = None
-        receipt_items = None
-        try:
-            parser = ReceiptParser()
-            receipt_data = parser.parse_pdf(temp_path)
-            receipt_date = receipt_data.date
-            receipt_text = receipt_data.raw_text
-            receipt_items = render_items(receipt_data.items)
-        except Exception as e:
-            logging.error(f"Error parsing PDF: {e}")
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-    finally:
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-    await state.update_data(
-        receipt_file_id=file_id, 
-        receipt_date=receipt_date,
-        receipt_text=receipt_text,
-        receipt_items=receipt_items
-    )
+    email = message.text.strip().lower()
+    await db.update_user_email(message.from_user.id, email)
+    await state.update_data(email=email)
+    
     await state.set_state(WarrantyStates.sku)
     await message.answer(
-        "Чек получен! ✅\n"
-        "Теперь введите артикул товара.  Он находится на том же ярлычке, что и ЧЗ, который вы ввели ранее.",
+        "введите артикул товара – это цифры с этикетки за словом «Артикул»",
         reply_markup=cancel_kb(),
     )
 
@@ -238,37 +215,49 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
         return
     
     await state.update_data(sku=message.text)
-    
-    user = await db.get_user(message.from_user.id)
-    if user and user.get("name"):
-        await finalize_warranty(message, state, user["name"])
-        return
-
-    await state.set_state(WarrantyStates.name)
+    await state.set_state(WarrantyStates.receipt_data)
     await message.answer(
-        "Как к вам обращаться?",
+        "Введите дату чека с ВБ и его номер.\n\n"
+        "Инструкция: зайти в свой профиль на ВБ - оплата - чеки.",
         reply_markup=cancel_kb(),
     )
 
-@router.message(WarrantyStates.name)
-async def warranty_name_handler(message: Message, state: FSMContext) -> None:
-    await db.upsert_user(message.from_user.id, message.from_user.username, message.text)
-    await finalize_warranty(message, state, message.text)
+@router.message(WarrantyStates.receipt_data)
+async def warranty_receipt_data_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
+        return
+    
+    receipt_text = message.text
+    # Attempt to extract date from text if possible, otherwise use today
+    # For now, we'll store the whole text as receipt_text and try to find a date
+    receipt_date = None
+    import re
+    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
+    if date_match:
+        receipt_date = date_match.group(1).replace("/", ".")
+    
+    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
+    
+    data = await state.get_data()
+    await finalize_warranty(message, state, data["name"])
 
 async def finalize_warranty(message: Message, state: FSMContext, name: str) -> None:
     data = await state.get_data()
     warranty_id = uuid.uuid4().hex[:8]
     
+    await db.upsert_user(message.from_user.id, message.from_user.username, name)
+    
     start_date, end_date = await db.create_warranty(
         warranty_id=warranty_id,
         tg_id=message.from_user.id,
         cz_code=data["cz_code"],
-        cz_file_id=data["cz_file_id"],
-        receipt_file_id=data["receipt_file_id"],
+        cz_file_id=data.get("cz_file_id"),
+        receipt_file_id=None,
         sku=data["sku"],
-        receipt_date=data["receipt_date"],
+        receipt_date=data.get("receipt_date"),
         receipt_text=data.get("receipt_text"),
-        receipt_items=data.get("receipt_items")
+        receipt_items=None
     )
     
     try:
@@ -284,4 +273,3 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         parse_mode="Markdown"
     )
     await state.clear()
-

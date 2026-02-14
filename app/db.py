@@ -17,6 +17,7 @@ class Database:
                     username TEXT,
                     name TEXT,
                     phone TEXT,
+                    email TEXT,
                     thread_id INTEGER,
                     created_at TEXT
                 );
@@ -85,10 +86,20 @@ class Database:
                 pass # already exists
 
             try:
+                await db.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            except aiosqlite.OperationalError:
+                pass # already exists
+
+            try:
                 await db.execute("ALTER TABLE warranties ADD COLUMN receipt_items TEXT")
             except aiosqlite.OperationalError:
                 pass # already exists
                 
+            try:
+                await db.execute("ALTER TABLE warranties ADD COLUMN synced INTEGER DEFAULT 0")
+            except aiosqlite.OperationalError:
+                pass # already exists
+
             try:
                 await db.execute("ALTER TABLE claims ADD COLUMN group_message_id INTEGER")
             except aiosqlite.OperationalError:
@@ -114,6 +125,11 @@ class Database:
     async def update_user_phone(self, tg_id: int, phone: str | None) -> None:
         async with aiosqlite.connect(self.path) as db:
             await db.execute("UPDATE users SET phone=? WHERE tg_id=?", (phone, tg_id))
+            await db.commit()
+
+    async def update_user_email(self, tg_id: int, email: str | None) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("UPDATE users SET email=? WHERE tg_id=?", (email, tg_id))
             await db.commit()
 
     async def update_user_thread(self, tg_id: int, thread_id: int | None) -> None:
@@ -263,6 +279,12 @@ class Database:
             )
             await db.commit()
 
+    async def is_cz_registered(self, cz_code: str) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT 1 FROM warranties WHERE cz_code=? LIMIT 1", (cz_code,))
+            row = await cur.fetchone()
+            return row is not None
+
     async def create_warranty(
         self,
         warranty_id: str,
@@ -352,6 +374,31 @@ class Database:
                 cur = await db.execute("SELECT COUNT(*) FROM claims")
             row = await cur.fetchone()
             return row[0] if row else 0
+
+    async def get_unsynced_warranties(self) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                """
+                SELECT w.*, u.username, u.email 
+                FROM warranties w 
+                LEFT JOIN users u ON w.tg_id = u.tg_id 
+                WHERE w.synced = 0
+                """
+            )
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
+    async def mark_as_synced(self, warranty_ids: list[str]) -> None:
+        if not warranty_ids:
+            return
+        async with aiosqlite.connect(self.path) as db:
+            placeholders = ",".join(["?"] * len(warranty_ids))
+            await db.execute(
+                f"UPDATE warranties SET synced = 1 WHERE id IN ({placeholders})",
+                warranty_ids
+            )
+            await db.commit()
 
     async def delete_user_data(self, tg_id: int) -> None:
         async with aiosqlite.connect(self.path) as db:
