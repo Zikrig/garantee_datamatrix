@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import re
+import io
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Any
 
 import pdfplumber
+import io
+from typing import Iterable, Any
 
 
 @dataclass
@@ -28,8 +31,8 @@ class ReceiptParser:
     )
     NUM_RE = re.compile(r"\d+[.,]\d{2}|\d+")
 
-    def parse_pdf(self, path: str) -> ReceiptData:
-        with pdfplumber.open(path) as pdf:
+    def parse_pdf(self, file_source: str | io.BytesIO) -> ReceiptData:
+        with pdfplumber.open(file_source) as pdf:
             page = pdf.pages[0]
             text = page.extract_text() or ""
             date = self._extract_date(page, text)
@@ -148,4 +151,17 @@ def render_items(items: Iterable[ReceiptItem]) -> str:
     for item in items:
         rows.append(f"- {item.name} — {item.quantity} шт — {item.amount:.2f}")
     return "\n".join(rows) if rows else "(не найдено)"
+
+
+def parse_receipt_pdf(file_source: str | io.BytesIO) -> list[dict[str, Any]] | None:
+    parser = ReceiptParser()
+    try:
+        data = parser.parse_pdf(file_source)
+        if not data.items:
+            return None
+        return [{"name": item.name, "price": item.amount} for item in data.items]
+    except Exception as e:
+        import logging
+        logging.error(f"Error parsing receipt: {e}")
+        return None
 
