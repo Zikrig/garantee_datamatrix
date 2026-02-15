@@ -105,26 +105,7 @@ async def start_next_claim_reg_step(message: Message, state: FSMContext, user_da
         )
         return
 
-    # If SKU is present, move to Receipt File
-    if not data.get("receipt_file_id") and not data.get("no_file"):
-        await state.set_state(ClaimStates.purchase_receipt_file)
-        await message.answer(
-            "Отправьте файл (PDF) чека с Wildberries.\n\n",
-            reply_markup=cancel_kb(),
-        )
-        return
-
-    # If Receipt File is handled, move to Receipt Text
-    if not data.get("receipt_text"):
-        await state.set_state(ClaimStates.purchase_receipt_text)
-        await message.answer(
-            "Введите дату чека с ВБ и его номер.\n\n"
-            "Инструкция: зайти в свой профиль на ВБ - оплата - чеки",
-            reply_markup=cancel_kb(),
-        )
-        return
-
-    # Once item is registered, move to problem description
+    # Once item is registered, move to problem description (чек запрашивается позже)
     # Save as warranty first
     warranty_id = uuid.uuid4().hex[:8]
     await db.create_warranty(
@@ -421,8 +402,15 @@ async def claim_purchase_receipt_file_handler(message: Message, state: FSMContex
             receipt_items=receipt_items,
             receipt_text=receipt_text
         )
-        user_data = await db.get_user(message.from_user.id)
-        await start_next_claim_reg_step(message, state, user_data)
+        
+        # После обработки чека переходим к файлам
+        await state.set_state(ClaimStates.files)
+        await state.update_data(files=[])
+        
+        await message.answer(
+            "Пришлите фото/видео неисправности (если есть, до 5 файлов). Нажмите “Готово”, когда закончите.",
+            reply_markup=files_kb(),
+        )
     except Exception as e:
         logging.error(f"Receipt parse error: {e}")
         await message.answer(
@@ -436,27 +424,23 @@ async def claim_purchase_receipt_file_handler(message: Message, state: FSMContex
             pass
 
 # Убрана возможность пропустить загрузку чека
-
-@router.message(ClaimStates.purchase_receipt_text)
-async def claim_purchase_receipt_text_handler(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
-        return
-    
-    receipt_text = message.text
-    receipt_date = None
-    import re
-    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
-    if date_match:
-        receipt_date = date_match.group(1).replace("/", ".")
-    
-    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_claim_reg_step(message, state, user_data)
+# Обработчик receipt_text удален - чек только PDF
 
 @router.message(ClaimStates.description)
 async def claim_description_handler(message: Message, state: FSMContext) -> None:
     await state.update_data(description=message.text)
+    
+    # После описания проблемы запрашиваем чек для заявки
+    data = await state.get_data()
+    if not data.get("receipt_file_id") and not data.get("no_file"):
+        await state.set_state(ClaimStates.purchase_receipt_file)
+        await message.answer(
+            "Отправьте файл (PDF) чека с Wildberries.\n\nТолько файл. Фото нельзя.",
+            reply_markup=cancel_kb(),
+        )
+        return
+    
+    # Если чек уже есть, переходим к файлам
     await state.set_state(ClaimStates.files)
     await state.update_data(files=[])
     
