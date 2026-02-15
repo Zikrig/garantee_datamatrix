@@ -109,7 +109,7 @@ async def start_next_claim_reg_step(message: Message, state: FSMContext, user_da
     if not data.get("receipt_file_id") and not data.get("no_file"):
         await state.set_state(ClaimStates.purchase_receipt_file)
         await message.answer(
-            "Отправьте файл (PDF) чека с Wildberries.\n\nТолько файл. Фото нельзя.",
+            "Отправьте файл (PDF) чека с Wildberries.\n\n",
             reply_markup=cancel_kb(),
         )
         return
@@ -308,6 +308,21 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
         return
     
     cz_code = message.text.strip()
+    
+    # Проверяем соответствие OUR_CODES
+    from app.utils import get_ours_tokens
+    tokens = get_ours_tokens()
+    
+    if tokens:
+        code_valid = any(token in cz_code for token in tokens)
+        if not code_valid:
+            await message.answer(
+                "❌ Код не относится к нашей продукции.\n"
+                "Пожалуйста, проверьте код и введите еще раз. Код должен содержать один из наших идентификаторов.",
+                reply_markup=cancel_kb()
+            )
+            return
+    
     if await db.is_cz_registered(cz_code):
         await message.answer(
             "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
