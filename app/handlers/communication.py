@@ -124,19 +124,19 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
         return
 
     try:
-        # Пытаемся скопировать сообщение
+        # Сначала пытаемся переслать сообщение (для сообщений с меню и других специальных типов)
         try:
-            await message.copy_to(user["tg_id"])
-        except Exception as copy_error:
-            # Если не удалось скопировать, пытаемся переслать
+            await bot.forward_message(
+                chat_id=user["tg_id"],
+                from_chat_id=message.chat.id,
+                message_id=message.message_id
+            )
+        except Exception as forward_error:
+            # Если пересылка не работает, пытаемся скопировать
             try:
-                await bot.forward_message(
-                    chat_id=user["tg_id"],
-                    from_chat_id=message.chat.id,
-                    message_id=message.message_id
-                )
-            except Exception as forward_error:
-                # Если и пересылка не работает, отправляем текстовое сообщение
+                await message.copy_to(user["tg_id"])
+            except Exception as copy_error:
+                # Если и копирование не работает, отправляем сообщение заново
                 if message.text:
                     await bot.send_message(user["tg_id"], f"💬 Сообщение от администратора:\n\n{message.text}")
                 elif message.caption:
@@ -152,7 +152,7 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
                 elif message.audio:
                     await bot.send_audio(user["tg_id"], message.audio.file_id, caption=message.caption or "💬 Сообщение от администратора")
                 else:
-                    raise copy_error
+                    raise forward_error
         
         # Добавляем заметку только если заявка активна
         if message.text or message.caption:
