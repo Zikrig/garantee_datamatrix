@@ -101,16 +101,34 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
 
     user = await db.get_user_by_thread(message.message_thread_id)
     if not user:
+        await message.reply("❌ Пользователь не найден для этого топика.")
+        return
+
+    # Получаем последнюю заявку пользователя
+    claim = await db.get_last_claim(user["tg_id"])
+    
+    if not claim:
+        await message.reply("❌ У пользователя нет заявок. Сообщение не отправлено.")
+        return
+    
+    status = claim.get("status", "")
+    
+    # Проверяем, что заявка активна (не закрыта/решена)
+    if status in ["Решено", "Закрыта"]:
+        await message.reply(f"❌ Заявка #{claim['id']} имеет статус «{status}». Сообщение не отправлено пользователю.")
+        return
+    
+    # Проверяем, что заявка активна
+    if status not in ["Новая", "В работе", "Нужны уточнения"]:
+        await message.reply(f"❌ Заявка #{claim['id']} имеет статус «{status}». Сообщение не отправлено пользователю.")
         return
 
     try:
         await message.copy_to(user["tg_id"])
-        claim = await db.get_last_claim_by_status(user["tg_id"], "Нужны уточнения") or \
-                await db.get_last_claim_by_status(user["tg_id"], "В работе") or \
-                await db.get_last_claim_by_status(user["tg_id"], "Новая")
-        # Добавляем заметку только если заявка активна (не закрыта)
-        if claim and claim.get("status") not in ["Решено", "Закрыта"] and message.text:
+        # Добавляем заметку только если заявка активна
+        if message.text:
             await db.add_claim_note(claim["id"], "manager", message.text)
     except Exception as e:
         logging.error(f"Failed to forward reply: {e}")
+        await message.reply(f"❌ Ошибка при отправке сообщения пользователю: {e}")
 
