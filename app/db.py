@@ -165,6 +165,14 @@ class Database:
             row = await cur.fetchone()
             return dict(row) if row else None
 
+    async def get_next_claim_number(self) -> int:
+        """Get next claim number starting from 1"""
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT MAX(CAST(id AS INTEGER)) FROM claims WHERE id GLOB '[0-9]*'")
+            row = await cur.fetchone()
+            max_num = row[0] if row[0] else 0
+            return max_num + 1
+
     async def create_claim(
         self,
         claim_id: str,

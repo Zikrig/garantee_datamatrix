@@ -50,6 +50,20 @@ async def sync_to_sheets():
             return
         sheet = worksheets[0]
         
+        # Проверяем, есть ли заголовки в первой строке
+        existing_data = await asyncio.to_thread(sheet.get_all_values)
+        headers = ["Email", "Username", "CZ Code", "Date", "SKU"]
+        
+        # Проверяем первую строку
+        if not existing_data or len(existing_data) == 0:
+            # Таблица полностью пустая - добавляем заголовки
+            logging.info("Sheet is empty, adding headers")
+            await asyncio.to_thread(sheet.insert_row, headers, 1)
+        elif not existing_data[0] or existing_data[0] != headers:
+            # Первая строка не содержит правильные заголовки - обновляем её
+            logging.info("Updating headers in Google Sheets")
+            await asyncio.to_thread(sheet.update, "A1:E1", [headers])
+        
         # Prepare rows
         # Columns: Email, Username, CZ Code, Date, SKU
         rows = []

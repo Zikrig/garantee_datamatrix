@@ -33,7 +33,10 @@ async def attach_clarification(message: Message, bot: Bot, state: FSMContext) ->
             await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
             await db.get_last_claim_by_status(message.from_user.id, "Новая")
     
-    logging.info(f"Forwarding message from user {message.from_user.id} to admin thread")
+    if not claim:
+        return False
+    
+    logging.info(f"Forwarding message from user {message.from_user.id} to admin thread (claim #{claim['id']})")
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
         return False

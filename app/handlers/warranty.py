@@ -15,7 +15,6 @@ from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
 from app.utils import upsert_from_user, decode_image, send_cached_photo
 from app.constants import WARRANTY_LEGAL_TEXT
-from app.receipt_parser import parse_receipt_pdf
 
 router = Router()
 
@@ -114,26 +113,7 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
             )
             return
 
-    # If SKU is present, move to Receipt File
-    if not data.get("receipt_file_id") and not data.get("no_file"):
-        await state.set_state(WarrantyStates.receipt_file)
-        await message.answer(
-            "Отправьте файл (PDF) чека с Wildberries.\n",
-            reply_markup=cancel_kb(),
-        )
-        return
-
-    # If Receipt File is handled, move to Receipt Text
-    if not data.get("receipt_text"):
-        await state.set_state(WarrantyStates.receipt_text)
-        await message.answer(
-            "Введите дату чека с ВБ и его номер.\n\n"
-            "Инструкция: зайти в свой профиль на ВБ - оплата - чеки.",
-            reply_markup=cancel_kb(),
-        )
-        return
-
-    # If everything is done, finalize
+    # If everything is done, finalize (без требования чека)
     await finalize_warranty(message, state, data.get("name") or user_data.get("name"))
 
 @router.message(WarrantyStates.cz_photo)
@@ -294,79 +274,7 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)
 
-@router.message(WarrantyStates.receipt_file)
-async def warranty_receipt_file_handler(message: Message, state: FSMContext) -> None:
-    # Проверяем, что это PDF файл, а не фото
-    if message.photo:
-        await message.answer("❌ Фото не принимается. Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
-        return
-    
-    if not message.document:
-        await message.answer("❌ Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
-        return
-    
-    if message.document.mime_type != "application/pdf":
-        await message.answer("❌ Принимаются только PDF файлы. Пожалуйста, отправьте файл PDF чека.", reply_markup=cancel_kb())
-        return
-    
-    file_id = message.document.file_id
-    status_msg = await message.answer("📄 Обрабатываю PDF-чек...")
-    
-    try:
-        file = await message.bot.get_file(file_id)
-        pdf_bytes = io.BytesIO()
-        await message.bot.download_file(file.file_path, destination=pdf_bytes)
-        pdf_bytes.seek(0)
-        
-        parsed_items = parse_receipt_pdf(pdf_bytes)
-        if not parsed_items:
-            await message.answer(
-                "❌ Не удалось распознать товары из чека. "
-                "Убедитесь, что файл содержит корректный чек с Wildberries и попробуйте еще раз.",
-                reply_markup=cancel_kb()
-            )
-            return
-        
-        receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
-        receipt_text = "Чек распознан из PDF"
-        
-        await state.update_data(
-            receipt_file_id=file_id,
-            receipt_items=receipt_items,
-            receipt_text=receipt_text
-        )
-        user_data = await db.get_user(message.from_user.id)
-        await start_next_registration_step(message, state, user_data)
-    except Exception as e:
-        logging.error(f"Receipt parse error: {e}")
-        await message.answer(
-            "❌ Произошла ошибка при обработке чека. Пожалуйста, попробуйте еще раз.",
-            reply_markup=cancel_kb()
-        )
-    finally:
-        try:
-            await status_msg.delete()
-        except:
-            pass
-
-# Убрана возможность пропустить загрузку чека
-
-@router.message(WarrantyStates.receipt_text)
-async def warranty_receipt_text_handler(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите данные чека текстом.", reply_markup=cancel_kb())
-        return
-    
-    receipt_text = message.text
-    receipt_date = None
-    import re
-    date_match = re.search(r'(\d{2}[.\/]\d{2}[.\/]\d{4})', receipt_text)
-    if date_match:
-        receipt_date = date_match.group(1).replace("/", ".")
-    
-    await state.update_data(receipt_text=receipt_text, receipt_date=receipt_date)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_registration_step(message, state, user_data)
+# Обработчики чека удалены - чек не требуется при получении гарантии
 
 async def finalize_warranty(message: Message, state: FSMContext, name: str) -> None:
     data = await state.get_data()
@@ -385,11 +293,11 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         tg_id=message.from_user.id,
         cz_code=data["cz_code"],
         cz_file_id=data.get("cz_file_id"),
-        receipt_file_id=data.get("receipt_file_id"),
+        receipt_file_id=None,
         sku=data["sku"],
-        receipt_date=data.get("receipt_date"),
-        receipt_text=data.get("receipt_text"),
-        receipt_items=data.get("receipt_items")
+        receipt_date=None,
+        receipt_text=None,
+        receipt_items=None
     )
     
     try:

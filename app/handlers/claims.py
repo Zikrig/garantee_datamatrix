@@ -502,7 +502,8 @@ async def claim_files_done_handler(callback: CallbackQuery, state: FSMContext) -
 
 async def finalize_claim(message: Message, state: FSMContext, user: Any) -> None:
     data = await state.get_data()
-    claim_id = uuid.uuid4().hex[:8]
+    claim_number = await db.get_next_claim_number()
+    claim_id = str(claim_number)
     
     await db.create_claim(
         claim_id=claim_id,
