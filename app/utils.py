@@ -171,6 +171,8 @@ async def send_admin_claim(
         for admin_id in ADMIN_CHAT_IDS:
             try:
                 await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"]), parse_mode="HTML")
+                # Задержка между отправками, чтобы избежать flood control
+                await asyncio.sleep(0.1)
             except Exception as e:
                 logging.error(f"Failed to send message to admin {admin_id}: {e}")
 
@@ -185,6 +187,8 @@ async def send_admin_claim(
                             await bot.send_video(admin_id, item["file_id"], caption=caption)
                         else:
                             await bot.send_document(admin_id, item["file_id"], caption=caption)
+                        # Задержка между отправками файлов
+                        await asyncio.sleep(0.1)
                     except Exception as e:
                         logging.error(f"Failed to send file to admin {admin_id}: {e}")
         return
@@ -243,6 +247,8 @@ async def send_admin_claim(
         for admin_id in ADMIN_CHAT_IDS:
             try:
                 await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="HTML")
+                # Задержка между отправками, чтобы избежать flood control
+                await asyncio.sleep(0.1)
             except Exception as e:
                 logging.error(f"Failed to send notification to admin {admin_id}: {e}")
 
@@ -255,6 +261,8 @@ async def send_admin_claim(
                         await bot.send_video(group_id, item["file_id"], message_thread_id=thread_id)
                     else:
                         await bot.send_document(group_id, item["file_id"], message_thread_id=thread_id)
+                    # Задержка между отправками файлов
+                    await asyncio.sleep(0.1)
                 except Exception as e:
                     logging.error(f"Failed to send file to group thread: {e}")
                     
@@ -264,6 +272,8 @@ async def send_admin_claim(
         for admin_id in ADMIN_CHAT_IDS:
             try:
                 await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"], is_group=False), parse_mode="HTML")
+                # Задержка между отправками, чтобы избежать flood control
+                await asyncio.sleep(0.1)
             except Exception as admin_err:
                 logging.error(f"Failed to send claim to admin {admin_id}: {admin_err}")
 
