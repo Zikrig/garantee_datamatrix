@@ -327,26 +327,6 @@ async def warranty_receipt_file_handler(message: Message, state: FSMContext) -> 
             )
             return
         
-        # Проверяем ЧЗ код на вхождение фрагмента из OUR_CODES
-        data = await state.get_data()
-        cz_code = data.get("cz_code")
-        
-        if cz_code:
-            from app.utils import get_ours_tokens
-            tokens = get_ours_tokens()
-            
-            if tokens:
-                # Проверяем, содержит ли ЧЗ код хотя бы один фрагмент из OUR_CODES
-                code_valid = any(token in cz_code for token in tokens)
-                
-                if not code_valid:
-                    await message.answer(
-                        "❌ Код Честный знак не относится к нашей продукции. "
-                        "Убедитесь, что вы отправляете чек с Wildberries на покупку наших товаров.",
-                        reply_markup=cancel_kb()
-                    )
-                    return
-        
         receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
         receipt_text = "Чек распознан из PDF"
         
