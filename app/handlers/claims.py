@@ -385,8 +385,12 @@ async def claim_purchase_receipt_file_handler(message: Message, state: FSMContex
         await message.bot.download_file(file.file_path, destination=pdf_bytes)
         pdf_bytes.seek(0)
         
-        parsed_items = parse_receipt_pdf(pdf_bytes)
-        if not parsed_items:
+        # Парсим чек для получения товаров и даты
+        from app.receipt_parser import ReceiptParser
+        parser = ReceiptParser()
+        receipt_data = parser.parse_pdf(pdf_bytes)
+        
+        if not receipt_data.items:
             await message.answer(
                 "❌ Не удалось распознать товары из чека. "
                 "Убедитесь, что файл содержит корректный чек с Wildberries и попробуйте еще раз.",
@@ -394,13 +398,15 @@ async def claim_purchase_receipt_file_handler(message: Message, state: FSMContex
             )
             return
         
-        receipt_items = "\n".join([f"- {i['name']} ({i['price']} руб.)" for i in parsed_items])
+        receipt_items = "\n".join([f"- {i.name} ({i.amount:.2f} руб.)" for i in receipt_data.items])
         receipt_text = "Чек распознан из PDF"
+        receipt_date = receipt_data.date
         
         await state.update_data(
             receipt_file_id=file_id,
             receipt_items=receipt_items,
-            receipt_text=receipt_text
+            receipt_text=receipt_text,
+            receipt_date=receipt_date
         )
         
         # После обработки чека переходим к файлам
@@ -435,7 +441,7 @@ async def claim_description_handler(message: Message, state: FSMContext) -> None
     if not data.get("receipt_file_id") and not data.get("no_file"):
         await state.set_state(ClaimStates.purchase_receipt_file)
         await message.answer(
-            "Отправьте файл (PDF) чека с Wildberries.\n\nТолько файл. Фото нельзя.",
+            "Отправьте файл (PDF) чека с Wildberries.",
             reply_markup=cancel_kb(),
         )
         return
@@ -514,6 +520,8 @@ async def finalize_claim(message: Message, state: FSMContext, user: Any) -> None
         user_db.get("name") if user_db else None,
         user_db.get("phone") if user_db else None,
         user_db.get("email") if user_db else None,
+        receipt_items=data.get("receipt_items"),
+        receipt_date=data.get("receipt_date"),
     )
 
     await message.answer(

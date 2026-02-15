@@ -14,10 +14,14 @@ from aiogram.filters import StateFilter, Filter
 
 class HasActiveClaim(Filter):
     async def __call__(self, message: Message) -> bool:
+        # Проверяем только активные заявки (не закрытые/решённые)
         claim = await db.get_last_claim_by_status(message.from_user.id, "Нужны уточнения") or \
                 await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
                 await db.get_last_claim_by_status(message.from_user.id, "Новая")
-        return bool(claim)
+        # Если заявка найдена, проверяем что она не закрыта
+        if claim and claim.get("status") not in ["Решено", "Закрыта"]:
+            return True
+        return False
 
 @router.message(
     F.chat.type == "private", 
@@ -34,6 +38,10 @@ async def attach_clarification(message: Message, bot: Bot, state: FSMContext) ->
             await db.get_last_claim_by_status(message.from_user.id, "Новая")
     
     if not claim:
+        return False
+    
+    # Проверяем, что заявка не закрыта
+    if claim.get("status") in ["Решено", "Закрыта"]:
         return False
     
     logging.info(f"Forwarding message from user {message.from_user.id} to admin thread (claim #{claim['id']})")
@@ -80,7 +88,8 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
         claim = await db.get_last_claim_by_status(user["tg_id"], "Нужны уточнения") or \
                 await db.get_last_claim_by_status(user["tg_id"], "В работе") or \
                 await db.get_last_claim_by_status(user["tg_id"], "Новая")
-        if claim and message.text:
+        # Добавляем заметку только если заявка активна (не закрыта)
+        if claim and claim.get("status") not in ["Решено", "Закрыта"] and message.text:
             await db.add_claim_note(claim["id"], "manager", message.text)
     except Exception as e:
         logging.error(f"Failed to forward reply: {e}")

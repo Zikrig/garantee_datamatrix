@@ -133,15 +133,23 @@ async def get_or_create_user_thread(bot: Bot, db, user_id: int) -> int | None:
         return None
 
 async def send_admin_claim(
-    bot: Bot, db, claim: dict, files: list[dict], username: str | None, name: str | None, phone: str | None, email: str | None = None
+    bot: Bot, db, claim: dict, files: list[dict], username: str | None, name: str | None, phone: str | None, email: str | None = None, receipt_items: str | None = None, receipt_date: str | None = None
 ) -> None:
     from app.keyboards import claim_status_kb
 
+    # Используем переданные данные чека, если есть, иначе пытаемся найти в гарантии
     products_info = ""
-    warranties = await db.get_warranties(claim['tg_id'])
-    w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
-    if w and w.get('receipt_items'):
-        products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
+    if receipt_items:
+        products_info = f"\n<b>Товары в чеке:</b>\n{escape(receipt_items)}"
+    else:
+        warranties = await db.get_warranties(claim['tg_id'])
+        w = next((w for w in warranties if w['cz_code'] == claim['purchase_value']), None)
+        if w and w.get('receipt_items'):
+            products_info = f"\n<b>Товары в чеке:</b>\n{escape(w['receipt_items'])}"
+    
+    receipt_date_info = ""
+    if receipt_date:
+        receipt_date_info = f"\n<b>Дата чека:</b> {escape(receipt_date)}"
 
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
@@ -157,7 +165,7 @@ async def send_admin_claim(
             f"телефон: {escape(phone or '-')}\n"
             f"email: {escape(email or '-')}\n"
             f"идентификатор: {escape(claim['purchase_type'])} / {escape(claim['purchase_value'])}\n"
-            f"{products_info}\n"
+            f"{receipt_date_info}{products_info}\n"
             f"текст: {escape(claim['description'])}\n"
         )
         for admin_id in ADMIN_CHAT_IDS:
@@ -199,7 +207,7 @@ async def send_admin_claim(
         f"Телефон: {escape(phone or '-')}\n"
         f"Email: {escape(email or '-')}\n"
         f"Идентификатор: {escape(claim['purchase_type'])} / {escape(claim['purchase_value'])}\n"
-        f"{products_info}\n"
+        f"{receipt_date_info}{products_info}\n"
         f"<b>Текст проблемы:</b>\n{escape(claim['description'])}"
     )
     
