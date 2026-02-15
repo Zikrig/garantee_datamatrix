@@ -124,10 +124,40 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
         return
 
     try:
-        await message.copy_to(user["tg_id"])
+        # Пытаемся скопировать сообщение
+        try:
+            await message.copy_to(user["tg_id"])
+        except Exception as copy_error:
+            # Если не удалось скопировать, пытаемся переслать
+            try:
+                await bot.forward_message(
+                    chat_id=user["tg_id"],
+                    from_chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+            except Exception as forward_error:
+                # Если и пересылка не работает, отправляем текстовое сообщение
+                if message.text:
+                    await bot.send_message(user["tg_id"], f"💬 Сообщение от администратора:\n\n{message.text}")
+                elif message.caption:
+                    await bot.send_message(user["tg_id"], f"💬 Сообщение от администратора:\n\n{message.caption}")
+                elif message.photo:
+                    await bot.send_photo(user["tg_id"], message.photo[-1].file_id, caption=message.caption or "💬 Сообщение от администратора")
+                elif message.video:
+                    await bot.send_video(user["tg_id"], message.video.file_id, caption=message.caption or "💬 Сообщение от администратора")
+                elif message.document:
+                    await bot.send_document(user["tg_id"], message.document.file_id, caption=message.caption or "💬 Сообщение от администратора")
+                elif message.voice:
+                    await bot.send_voice(user["tg_id"], message.voice.file_id, caption=message.caption or "💬 Сообщение от администратора")
+                elif message.audio:
+                    await bot.send_audio(user["tg_id"], message.audio.file_id, caption=message.caption or "💬 Сообщение от администратора")
+                else:
+                    raise copy_error
+        
         # Добавляем заметку только если заявка активна
-        if message.text:
-            await db.add_claim_note(claim["id"], "manager", message.text)
+        if message.text or message.caption:
+            text_content = message.text or message.caption
+            await db.add_claim_note(claim["id"], "manager", text_content)
     except Exception as e:
         logging.error(f"Failed to forward reply: {e}")
         await message.reply(f"❌ Ошибка при отправке сообщения пользователю: {e}")
