@@ -99,6 +99,10 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
     if not group_id_str or str(message.chat.id) != group_id_str:
         return
 
+    # Не пересылаем служебные сообщения и сообщения от бота
+    if message.service or (message.from_user and message.from_user.is_bot):
+        return
+
     user = await db.get_user_by_thread(message.message_thread_id)
     if not user:
         await message.reply("❌ Пользователь не найден для этого топика.")
