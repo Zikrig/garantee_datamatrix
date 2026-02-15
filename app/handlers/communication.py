@@ -100,7 +100,13 @@ async def admin_group_reply_handler(message: Message, bot: Bot) -> None:
         return
 
     # Не пересылаем служебные сообщения и сообщения от бота
-    if message.service or (message.from_user and message.from_user.is_bot):
+    # Служебные сообщения не имеют from_user или имеют специальные поля
+    if not message.from_user:
+        # Служебное сообщение (закрепление, добавление участников и т.д.)
+        return
+    
+    if message.from_user.is_bot:
+        # Сообщение от бота
         return
 
     user = await db.get_user_by_thread(message.message_thread_id)
