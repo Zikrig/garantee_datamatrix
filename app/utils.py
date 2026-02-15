@@ -182,12 +182,14 @@ async def send_admin_claim(
         return
 
     group_id = int(group_id_str)
-    logging.info(f"Sending claim to group {group_id} topic {claim['tg_id']}")
+    logging.info(f"Sending claim {claim['id']} to group {group_id} for user {claim['tg_id']}")
+    
     thread_id = await get_or_create_user_thread(bot, db, claim["tg_id"])
     if not thread_id:
-        logging.error(f"Failed to create/get thread for user {claim['tg_id']}")
-        return
-
+        logging.error(f"Failed to create/get thread for user {claim['tg_id']}. User exists: {await db.get_user(claim['tg_id']) is not None}")
+        # Пытаемся отправить без thread_id (в основную группу)
+        thread_id = None
+    
     text = (
         "🛠 <b>Новая заявка</b>\n"
         f"ID: <code>{escape(claim['id'])}</code>\n"
@@ -201,45 +203,59 @@ async def send_admin_claim(
         f"<b>Текст проблемы:</b>\n{escape(claim['description'])}"
     )
     
-    group_msg = await bot.send_message(
-        group_id, 
-        text, 
-        message_thread_id=thread_id, 
-        reply_markup=claim_status_kb(claim["id"], is_group=True),
-        parse_mode="HTML"
-    )
-    
     try:
-        await bot.pin_chat_message(group_id, group_msg.message_id)
-    except Exception as e:
-        logging.warning(f"Failed to pin message in group: {e}")
-    
-    await db.update_claim_group_message(claim["id"], group_msg.message_id)
-    
-    clean_group_id = group_id_str.replace("-100", "")
-    msg_link = f"https://t.me/c/{clean_group_id}/{group_msg.message_id}"
-    
-    private_text = (
-        f"🛠 <b>Новая заявка {escape(claim['id'])}</b>\n"
-        f"Пользователь: @{escape(username or '-')}\n"
-        f"Ссылка: {msg_link}"
-    )
-    
-    for admin_id in ADMIN_CHAT_IDS:
+        send_kwargs = {
+            "chat_id": group_id,
+            "text": text,
+            "reply_markup": claim_status_kb(claim["id"], is_group=True),
+            "parse_mode": "HTML"
+        }
+        if thread_id:
+            send_kwargs["message_thread_id"] = thread_id
+        
+        group_msg = await bot.send_message(**send_kwargs)
+        logging.info(f"Successfully sent claim {claim['id']} to group {group_id}, message_id: {group_msg.message_id}")
+        
         try:
-            await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="HTML")
+            await bot.pin_chat_message(group_id, group_msg.message_id)
         except Exception as e:
-            logging.error(f"Failed to send notification to admin {admin_id}: {e}")
-
-    if files:
-        for item in files:
+            logging.warning(f"Failed to pin message in group: {e}")
+        
+        await db.update_claim_group_message(claim["id"], group_msg.message_id)
+        
+        clean_group_id = group_id_str.replace("-100", "")
+        msg_link = f"https://t.me/c/{clean_group_id}/{group_msg.message_id}"
+        
+        private_text = (
+            f"🛠 <b>Новая заявка {escape(claim['id'])}</b>\n"
+            f"Пользователь: @{escape(username or '-')}\n"
+            f"Ссылка: {msg_link}"
+        )
+        
+        for admin_id in ADMIN_CHAT_IDS:
             try:
-                if item["file_type"] == "photo":
-                    await bot.send_photo(group_id, item["file_id"], message_thread_id=thread_id)
-                elif item["file_type"] == "video":
-                    await bot.send_video(group_id, item["file_id"], message_thread_id=thread_id)
-                else:
-                    await bot.send_document(group_id, item["file_id"], message_thread_id=thread_id)
+                await bot.send_message(admin_id, private_text, reply_markup=claim_status_kb(claim["id"], is_group=False, group_link=msg_link), parse_mode="HTML")
             except Exception as e:
-                logging.error(f"Failed to send file to group thread: {e}")
+                logging.error(f"Failed to send notification to admin {admin_id}: {e}")
+
+        if files:
+            for item in files:
+                try:
+                    if item["file_type"] == "photo":
+                        await bot.send_photo(group_id, item["file_id"], message_thread_id=thread_id)
+                    elif item["file_type"] == "video":
+                        await bot.send_video(group_id, item["file_id"], message_thread_id=thread_id)
+                    else:
+                        await bot.send_document(group_id, item["file_id"], message_thread_id=thread_id)
+                except Exception as e:
+                    logging.error(f"Failed to send file to group thread: {e}")
+                    
+    except Exception as e:
+        logging.error(f"Failed to send claim {claim['id']} to group {group_id}: {e}")
+        # Пытаемся отправить админам напрямую
+        for admin_id in ADMIN_CHAT_IDS:
+            try:
+                await bot.send_message(admin_id, text, reply_markup=claim_status_kb(claim["id"], is_group=False), parse_mode="HTML")
+            except Exception as admin_err:
+                logging.error(f"Failed to send claim to admin {admin_id}: {admin_err}")
 

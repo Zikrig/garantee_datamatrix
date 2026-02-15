@@ -16,6 +16,13 @@ async def main() -> None:
         raise RuntimeError("BOT_TOKEN is required")
 
     await db.init()
+    
+    # Проверяем сохраненную группу при старте
+    admin_group_id = await db.get_setting("admin_group_id")
+    if admin_group_id:
+        logging.info(f"Admin group ID loaded from database: {admin_group_id}")
+    else:
+        logging.warning("Admin group ID not found in database. Use /add command in group to set it.")
 
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())

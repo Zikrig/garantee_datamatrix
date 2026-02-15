@@ -47,8 +47,17 @@ async def admin_add_group_handler(message: Message, bot: Bot) -> None:
         )
         return
 
-    await db.set_setting("admin_group_id", str(message.chat.id))
-    await message.answer(f"✅ Эта группа ({message.chat.title}) теперь успешно привязана для обработки заявок.")
+    group_id_str = str(message.chat.id)
+    await db.set_setting("admin_group_id", group_id_str)
+    logging.info(f"Admin group ID saved: {group_id_str} for group: {message.chat.title}")
+    
+    # Проверяем, что настройка сохранилась
+    saved_group_id = await db.get_setting("admin_group_id")
+    if saved_group_id != group_id_str:
+        logging.error(f"Failed to save admin_group_id! Expected: {group_id_str}, Got: {saved_group_id}")
+        await message.answer(f"⚠️ Предупреждение: группа сохранена, но проверка не прошла. Сохранено: {saved_group_id}")
+    else:
+        await message.answer(f"✅ Эта группа ({message.chat.title}) теперь успешно привязана для обработки заявок.")
 
 @router.callback_query(F.data.startswith("admin:list_claims:"))
 async def admin_list_claims_handler(callback: CallbackQuery) -> None:

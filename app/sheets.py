@@ -26,7 +26,6 @@ def get_gspread_client():
 
 async def sync_to_sheets():
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
-    sheet_name = os.getenv("SHEET_NAME", "Sheet1")
     
     if not spreadsheet_id:
         logging.error("SPREADSHEET_ID not found in environment variables")
@@ -44,7 +43,12 @@ async def sync_to_sheets():
             return
 
         spreadsheet = await asyncio.to_thread(client.open_by_key, spreadsheet_id)
-        sheet = await asyncio.to_thread(spreadsheet.worksheet, sheet_name)
+        # Используем индекс 0 (первый лист) вместо имени
+        worksheets = await asyncio.to_thread(spreadsheet.worksheets)
+        if not worksheets:
+            logging.error("No worksheets found in spreadsheet")
+            return
+        sheet = worksheets[0]
         
         # Prepare rows
         # Columns: Email, Username, CZ Code, Date, SKU
