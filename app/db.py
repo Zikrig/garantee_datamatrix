@@ -278,6 +278,17 @@ class Database:
             row = await cur.fetchone()
             return dict(row) if row else None
 
+    async def get_last_claim(self, tg_id: int) -> dict[str, Any] | None:
+        """Get last claim for user regardless of status"""
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM claims WHERE tg_id=? ORDER BY updated_at DESC LIMIT 1",
+                (tg_id,),
+            )
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
     async def add_cz_code(self, tg_id: int, cz_code: str) -> None:
         now = dt.datetime.utcnow().isoformat()
         async with aiosqlite.connect(self.path) as db:

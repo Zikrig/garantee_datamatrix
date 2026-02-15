@@ -14,13 +14,26 @@ from aiogram.filters import StateFilter, Filter
 
 class HasActiveClaim(Filter):
     async def __call__(self, message: Message) -> bool:
-        # Проверяем только активные заявки (не закрытые/решённые)
-        claim = await db.get_last_claim_by_status(message.from_user.id, "Нужны уточнения") or \
-                await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
-                await db.get_last_claim_by_status(message.from_user.id, "Новая")
-        # Если заявка найдена, проверяем что она не закрыта
-        if claim and claim.get("status") not in ["Решено", "Закрыта"]:
+        # Получаем последнюю заявку пользователя независимо от статуса
+        last_claim = await db.get_last_claim(message.from_user.id)
+        
+        if not last_claim:
+            logging.debug(f"No claims found for user {message.from_user.id}")
+            return False
+        
+        status = last_claim.get("status", "")
+        
+        # Проверяем, что заявка активна (не закрыта/решена)
+        if status in ["Решено", "Закрыта"]:
+            logging.info(f"User {message.from_user.id} has closed/resolved claim #{last_claim['id']} (status: {status}), not forwarding message")
+            return False
+        
+        # Проверяем только активные статусы
+        if status in ["Новая", "В работе", "Нужны уточнения"]:
+            logging.debug(f"User {message.from_user.id} has active claim #{last_claim['id']} (status: {status})")
             return True
+        
+        logging.debug(f"User {message.from_user.id} has claim #{last_claim['id']} with unknown status: {status}")
         return False
 
 @router.message(
@@ -33,18 +46,25 @@ class HasActiveClaim(Filter):
 )
 async def attach_clarification(message: Message, bot: Bot, state: FSMContext) -> bool:
     # Forward user message to admin thread if user has an active claim
-    claim = await db.get_last_claim_by_status(message.from_user.id, "Нужны уточнения") or \
-            await db.get_last_claim_by_status(message.from_user.id, "В работе") or \
-            await db.get_last_claim_by_status(message.from_user.id, "Новая")
+    claim = await db.get_last_claim(message.from_user.id)
     
     if not claim:
+        logging.debug(f"No claim found for user {message.from_user.id}, not forwarding")
         return False
+    
+    status = claim.get("status", "")
     
     # Проверяем, что заявка не закрыта
-    if claim.get("status") in ["Решено", "Закрыта"]:
+    if status in ["Решено", "Закрыта"]:
+        logging.info(f"User {message.from_user.id} message not forwarded - claim #{claim['id']} is {status}")
         return False
     
-    logging.info(f"Forwarding message from user {message.from_user.id} to admin thread (claim #{claim['id']})")
+    # Проверяем, что заявка активна
+    if status not in ["Новая", "В работе", "Нужны уточнения"]:
+        logging.info(f"User {message.from_user.id} message not forwarded - claim #{claim['id']} has status: {status}")
+        return False
+    
+    logging.info(f"Forwarding message from user {message.from_user.id} to admin thread (claim #{claim['id']}, status: {status})")
     group_id_str = await db.get_setting("admin_group_id")
     if not group_id_str:
         return False
