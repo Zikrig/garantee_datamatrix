@@ -210,6 +210,9 @@ async def _create_question_claim(message: Message, state: FSMContext, question_t
 @router.callback_query(F.data.startswith("faq:answer:"))
 async def faq_answer_show_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
+    # Сохраняем текст вопроса в данных, чтобы после просмотра ответа кнопка «Нет, отправить вопрос менеджеру» всё ещё работала
+    data = await state.get_data()
+    saved_question = data.get("faq_user_question")
     try:
         qid = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
@@ -227,6 +230,8 @@ async def faq_answer_show_handler(callback: CallbackQuery, state: FSMContext) ->
         parse_mode="HTML",
     )
     await state.clear()
+    if saved_question:
+        await state.update_data(faq_user_question=saved_question)
 
 
 @router.callback_query(F.data == "faq:create_claim")
