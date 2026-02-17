@@ -29,6 +29,8 @@ class WarrantyStates(StatesGroup):
     phone = State()
     email = State()
     sku = State()
+    receipt_date_wb = State()   # дата чека из WB
+    receipt_number_wb = State()  # номер чека из WB
     receipt_file = State()
     receipt_text = State()
 

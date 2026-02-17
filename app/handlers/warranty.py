@@ -32,7 +32,7 @@ async def start_warranty_activation(message: Message, state: FSMContext) -> None
         message.chat.id, 
         "data/images/chz.png",
         "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
-        "Отправьте фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК».",
+        "Отправьте СЮДА фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК»",
         reply_markup=kb,
     )
 
@@ -113,7 +113,24 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
             )
             return
 
-    # If everything is done, finalize (без требования чека)
+    # После артикула — дата и номер чека из WB
+    if current_state in [WarrantyStates.sku, WarrantyStates.receipt_date_wb, WarrantyStates.receipt_number_wb]:
+        if not data.get("receipt_date_wb"):
+            await state.set_state(WarrantyStates.receipt_date_wb)
+            await message.answer(
+                "Введите дату чека из Wildberries (например: 01.02.2025).",
+                reply_markup=cancel_kb(),
+            )
+            return
+        if not data.get("receipt_number_wb"):
+            await state.set_state(WarrantyStates.receipt_number_wb)
+            await message.answer(
+                "Введите номер чека из Wildberries.",
+                reply_markup=cancel_kb(),
+            )
+            return
+
+    # If everything is done, finalize
     await finalize_warranty(message, state, data.get("name") or user_data.get("name"))
 
 @router.message(WarrantyStates.cz_photo)
@@ -274,7 +291,37 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)
 
-# Обработчики чека удалены - чек не требуется при получении гарантии
+@router.message(WarrantyStates.receipt_date_wb)
+async def warranty_receipt_date_wb_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите дату чека текстом.", reply_markup=cancel_kb())
+        return
+    raw = message.text.strip()
+    # Принимаем DD.MM.YYYY или YYYY-MM-DD
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
+        try:
+            dt.datetime.strptime(raw, fmt)
+            break
+        except ValueError:
+            continue
+    else:
+        await message.answer(
+            "Неверный формат даты. Введите дату в формате ДД.ММ.ГГГГ (например: 01.02.2025).",
+            reply_markup=cancel_kb(),
+        )
+        return
+    await state.update_data(receipt_date_wb=raw)
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
+
+@router.message(WarrantyStates.receipt_number_wb)
+async def warranty_receipt_number_wb_handler(message: Message, state: FSMContext) -> None:
+    if not message.text:
+        await message.answer("Пожалуйста, введите номер чека из WB текстом.", reply_markup=cancel_kb())
+        return
+    await state.update_data(receipt_number_wb=message.text.strip())
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data)
 
 async def finalize_warranty(message: Message, state: FSMContext, name: str) -> None:
     data = await state.get_data()
@@ -295,8 +342,8 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         cz_file_id=data.get("cz_file_id"),
         receipt_file_id=None,
         sku=data["sku"],
-        receipt_date=None,
-        receipt_text=None,
+        receipt_date=data.get("receipt_date_wb"),
+        receipt_text=data.get("receipt_number_wb"),
         receipt_items=None
     )
     
