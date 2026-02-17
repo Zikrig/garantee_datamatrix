@@ -80,6 +80,13 @@ class Database:
                     cz_code TEXT,
                     created_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS faq_questions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    keywords TEXT NOT NULL
+                );
                 """
             )
             
@@ -108,6 +115,13 @@ class Database:
                 await db.execute("ALTER TABLE claims ADD COLUMN group_message_id INTEGER")
             except aiosqlite.OperationalError:
                 pass # already exists
+
+            try:
+                await db.execute(
+                    "CREATE TABLE IF NOT EXISTS faq_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, answer TEXT NOT NULL, keywords TEXT NOT NULL)"
+                )
+            except aiosqlite.OperationalError:
+                pass
 
             await db.commit()
 
@@ -440,4 +454,74 @@ class Database:
             await db.execute("DELETE FROM warranties WHERE tg_id=?", (tg_id,))
             await db.execute("DELETE FROM cz_codes WHERE tg_id=?", (tg_id,))
             await db.commit()
+
+    # --- FAQ questions ---
+    async def list_faq_questions(self, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT * FROM faq_questions ORDER BY title ASC LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
+    async def count_faq_questions(self) -> int:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT COUNT(*) FROM faq_questions")
+            row = await cur.fetchone()
+            return row[0] if row else 0
+
+    async def get_faq_question(self, qid: int) -> dict[str, Any] | None:
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM faq_questions WHERE id=?", (qid,))
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+    async def create_faq_question(self, title: str, answer: str, keywords: list[str]) -> int:
+        import json
+        keywords_json = json.dumps(keywords, ensure_ascii=False)
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "INSERT INTO faq_questions (title, answer, keywords) VALUES (?, ?, ?)",
+                (title, answer, keywords_json),
+            )
+            await db.commit()
+            return cur.lastrowid
+
+    async def update_faq_question(self, qid: int, title: str, answer: str, keywords: list[str]) -> None:
+        import json
+        keywords_json = json.dumps(keywords, ensure_ascii=False)
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "UPDATE faq_questions SET title=?, answer=?, keywords=? WHERE id=?",
+                (title, answer, keywords_json, qid),
+            )
+            await db.commit()
+
+    async def delete_faq_question(self, qid: int) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("DELETE FROM faq_questions WHERE id=?", (qid,))
+            await db.commit()
+
+    async def search_faq_by_keywords(self, text: str) -> list[dict[str, Any]]:
+        import json
+        if not text or not text.strip():
+            return []
+        text_lower = text.strip().lower()
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute("SELECT * FROM faq_questions ORDER BY title ASC")
+            rows = await cur.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                try:
+                    keywords = json.loads(d.get("keywords") or "[]")
+                except Exception:
+                    keywords = []
+                if any(kw.lower() in text_lower for kw in keywords if kw):
+                    result.append(d)
+            return result
 

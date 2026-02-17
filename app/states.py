@@ -37,3 +37,16 @@ class WarrantyStates(StatesGroup):
 class CheckZnackStates(StatesGroup):
     waiting_for_code = State()
 
+
+class FaqAskStates(StatesGroup):
+    waiting_question = State()
+
+
+class AdminFaqStates(StatesGroup):
+    edit_title = State()
+    edit_answer = State()
+    edit_keywords = State()
+    add_title = State()
+    add_answer = State()
+    add_keywords = State()
+

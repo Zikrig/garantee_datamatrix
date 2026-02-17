@@ -6,7 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.database import db
-from app.handlers import common, admin, warranty, claims, kb_admin, communication, unexpected
+from app.handlers import common, admin, warranty, claims, kb_admin, faq_admin, communication, unexpected
 from app.sheets import sheets_sync_scheduler
 
 async def main() -> None:
@@ -32,6 +32,7 @@ async def main() -> None:
     # 1. Admin & KB Management
     dp.include_router(admin.router)
     dp.include_router(kb_admin.router)
+    dp.include_router(faq_admin.router)
     
     # 2. Specific User Flows (States)
     dp.include_router(warranty.router)

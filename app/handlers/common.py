@@ -7,9 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.db import Database
-from app.utils import upsert_from_user, load_kb, DEFAULT_KB, get_ours_tokens
-from app.keyboards import main_menu_kb, cancel_kb, claims_list_kb
-from app.states import CheckZnackStates
+from app.utils import upsert_from_user, load_kb, DEFAULT_KB, get_ours_tokens, send_admin_claim
+from app.keyboards import main_menu_kb, cancel_kb, claims_list_kb, faq_suggestions_kb
+from app.states import CheckZnackStates, FaqAskStates
 from app.constants import CARE_TEXT, TRUST_TEXT, FAQ_ITEMS
 
 router = Router()
@@ -149,6 +149,97 @@ async def faq_callback_handler(callback: CallbackQuery) -> None:
     rows = [[InlineKeyboardButton(text=l["label"], url=l["url"])] for l in links]
     rows.append([InlineKeyboardButton(text="Задать вопрос", callback_data="faq:ask")])
     await callback.message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+
+# --- Задать вопрос: ввод текста -> подсказки по ключевым словам или заявка ---
+@router.callback_query(F.data == "faq:ask")
+async def faq_ask_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(FaqAskStates.waiting_question)
+    await callback.message.answer("Введите ваш вопрос текстом:", reply_markup=cancel_kb())
+
+
+@router.message(FaqAskStates.waiting_question, F.text)
+async def faq_ask_text_handler(message: Message, state: FSMContext) -> None:
+    question_text = (message.text or "").strip()
+    if not question_text:
+        await message.answer("Пожалуйста, введите вопрос текстом.", reply_markup=cancel_kb())
+        return
+    await upsert_from_user(db, message.from_user)
+    matched = await db.search_faq_by_keywords(question_text)
+    await state.update_data(faq_user_question=question_text)
+    if matched:
+        await message.answer(
+            "Возможно, вы имели в виду:",
+            reply_markup=faq_suggestions_kb(matched),
+        )
+        return
+    # Нет совпадений — сразу создаём заявку
+    await _create_question_claim(message, state, question_text)
+
+
+async def _create_question_claim(message: Message, state: FSMContext, question_text: str) -> None:
+    claim_number = await db.get_next_claim_number()
+    claim_id = str(claim_number)
+    await db.create_claim(
+        claim_id=claim_id,
+        tg_id=message.from_user.id,
+        description=question_text,
+        purchase_type="Вопрос",
+        purchase_value="",
+    )
+    claim = await db.get_claim(claim_id)
+    user_db = await db.get_user(message.from_user.id)
+    await send_admin_claim(
+        message.bot,
+        db,
+        claim,
+        [],
+        message.from_user.username,
+        user_db.get("name") if user_db else None,
+        user_db.get("phone") if user_db else None,
+        user_db.get("email") if user_db else None,
+    )
+    await state.clear()
+    await message.answer(
+        "Ваш вопрос отправлен. Мы ответим в ближайшее время.",
+        reply_markup=main_menu_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("faq:answer:"))
+async def faq_answer_show_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    try:
+        qid = int(callback.data.split(":")[2])
+    except (IndexError, ValueError):
+        await callback.message.answer("Ответ не найден.", reply_markup=main_menu_kb())
+        await state.clear()
+        return
+    q = await db.get_faq_question(qid)
+    if not q:
+        await callback.message.answer("Ответ не найден.", reply_markup=main_menu_kb())
+        await state.clear()
+        return
+    await callback.message.answer(
+        f"<b>{escape(q['title'])}</b>\n\n{escape(q['answer'])}",
+        reply_markup=main_menu_kb(),
+        parse_mode="HTML",
+    )
+    await state.clear()
+
+
+@router.callback_query(F.data == "faq:create_claim")
+async def faq_create_claim_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    question_text = data.get("faq_user_question") or ""
+    if not question_text:
+        await callback.message.answer("Вопрос не найден. Напишите вопрос ещё раз.", reply_markup=main_menu_kb())
+        await state.clear()
+        return
+    message = callback.message
+    await _create_question_claim(message, state, question_text)
 
 @router.message(Command("check_znack"))
 async def check_znack_start_handler(message: Message, state: FSMContext) -> None:

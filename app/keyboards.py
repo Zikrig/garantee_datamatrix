@@ -147,8 +147,55 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 Все заявки", callback_data="admin:list_claims:all")],
             [InlineKeyboardButton(text="📨 Новые заявки", callback_data="admin:list_claims:new")],
+            [InlineKeyboardButton(text="❓ Вопросы", callback_data="admin:faq")],
             [InlineKeyboardButton(text="📚 База знаний", callback_data="admin:kb_menu")],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")]
         ]
     )
+
+
+QUESTIONS_PER_PAGE = 10
+
+
+def faq_questions_list_kb(questions: list[dict], page: int, total: int) -> InlineKeyboardMarkup:
+    rows = []
+    for q in questions:
+        title = (q.get("title") or "Без названия")[:40]
+        if len(q.get("title") or "") > 40:
+            title += "…"
+        rows.append([InlineKeyboardButton(text=title, callback_data=f"admin:faq_edit:{q['id']}")])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:faq_page:{page - 1}"))
+    if (page + 1) * QUESTIONS_PER_PAGE < total:
+        nav.append(InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin:faq_page:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton(text="➕ Добавить вопрос", callback_data="admin:faq_add")])
+    rows.append([InlineKeyboardButton(text="🔙 В меню админа", callback_data="admin:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def faq_question_edit_kb(qid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Название", callback_data=f"admin:faq_set_title:{qid}")],
+            [InlineKeyboardButton(text="📝 Ответ", callback_data=f"admin:faq_set_answer:{qid}")],
+            [InlineKeyboardButton(text="🔤 Ключевые слова", callback_data=f"admin:faq_set_keywords:{qid}")],
+            [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"admin:faq_del:{qid}")],
+            [InlineKeyboardButton(text="🔙 К списку", callback_data="admin:faq")],
+        ]
+    )
+
+
+def faq_suggestions_kb(matched: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for q in matched[:10]:
+        title = (q.get("title") or "Ответ")[:35]
+        if len(q.get("title") or "") > 35:
+            title += "…"
+        rows.append([InlineKeyboardButton(text=title, callback_data=f"faq:answer:{q['id']}")])
+    rows.append([InlineKeyboardButton(text="❌ Нет, отправить вопрос менеджеру", callback_data="faq:create_claim")])
+    rows.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
