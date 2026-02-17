@@ -1,4 +1,5 @@
 import datetime as dt
+import os
 from typing import Any
 
 import aiosqlite
@@ -9,6 +10,9 @@ class Database:
         self.path = path
 
     async def init(self) -> None:
+        db_dir = os.path.dirname(self.path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         async with aiosqlite.connect(self.path) as db:
             await db.executescript(
                 """
@@ -106,6 +110,16 @@ class Database:
                 pass # already exists
 
             await db.commit()
+
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+            )
+            if await cur.fetchone() is None:
+                raise RuntimeError(
+                    f"Database init failed: table 'users' not found at {self.path}. "
+                    "Check that the DB directory is writable and not read-only."
+                )
 
     async def upsert_user(self, tg_id: int, username: str | None, name: str | None) -> None:
         now = dt.datetime.utcnow().isoformat()
