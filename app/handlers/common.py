@@ -70,7 +70,8 @@ async def show_user_warranties(message: Message, user_id: int) -> None:
         except:
             pass
         sku = w.get('sku') or 'Изделие'
-        text += f"🔹 <b>{escape(sku)}</b>\n🗓 Гарантия до: {escape(end_date)}\n🔢 Код: <code>{escape(w['cz_code'])}</code>\n\n"
+        cz_code = w.get('cz_code') or ''
+        text += f"🔹 <b>{escape(sku)}</b>\n🗓 Гарантия до: {escape(end_date)}\n🔢 Код: <code>{escape(cz_code)}</code>\n\n"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Активировать еще", callback_data="warranty:new")],

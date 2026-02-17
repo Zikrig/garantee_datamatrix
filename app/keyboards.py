@@ -132,10 +132,9 @@ def warranties_selection_kb(warranties: list[dict]) -> InlineKeyboardMarkup:
     for w in warranties:
         sku = w.get("sku") or "Без артикула"
         cz = w.get("cz_code") or ""
-        display_cz = (cz[:10] + "...") if len(cz) > 10 else cz
         rows.append([
             InlineKeyboardButton(
-                text=f"📦 {sku} ({display_cz})",
+                text=f"📦 {sku} ({cz})",
                 callback_data=f"select_w:{w['id']}"
             )
         ])
