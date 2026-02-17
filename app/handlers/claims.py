@@ -155,7 +155,7 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
             callback.message.bot, 
             db, 
             callback.message.chat.id, 
-            "data/images/chz.png",
+            "data/images/chz2.png",
             "Чтобы получить расширенную гарантию, \n"
             "отправьте фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК»",
             reply_markup=kb

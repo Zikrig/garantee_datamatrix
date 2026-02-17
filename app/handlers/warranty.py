@@ -30,7 +30,7 @@ async def start_warranty_activation(message: Message, state: FSMContext) -> None
         message.bot, 
         db, 
         message.chat.id, 
-        "data/images/chz.png",
+        "data/images/chz2.png",
         "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
         "Отправьте СЮДА фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК»",
         reply_markup=kb,
