@@ -18,7 +18,7 @@ from app.keyboards import (
     main_menu_kb, cancel_kb, purchase_type_kb, files_kb, 
     skip_kb, warranties_selection_kb, claim_status_kb
 )
-from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim, send_cached_photo
+from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim, send_cached_photo, normalize_cz_code
 from app.receipt_parser import parse_receipt_pdf
 
 router = Router()
@@ -268,7 +268,7 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
         )
         return
 
-    cz_code = codes[0]
+    cz_code = normalize_cz_code(codes[0])
     if await db.is_cz_registered(cz_code):
         await message.answer(
             "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
@@ -288,7 +288,7 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
         await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
         return
     
-    cz_code = message.text.strip()
+    cz_code = normalize_cz_code(message.text.strip())
     
     # Проверяем соответствие OUR_CODES
     from app.utils import get_ours_tokens

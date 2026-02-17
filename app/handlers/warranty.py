@@ -13,7 +13,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from app.database import db
 from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
-from app.utils import upsert_from_user, decode_image, send_cached_photo
+from app.utils import upsert_from_user, decode_image, send_cached_photo, normalize_cz_code
 from app.constants import WARRANTY_LEGAL_TEXT
 
 router = Router()
@@ -201,7 +201,7 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         )
         return
 
-    cz_code = codes[0]
+    cz_code = normalize_cz_code(codes[0])
     if await db.is_cz_registered(cz_code):
         await message.answer(
             "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
@@ -220,7 +220,7 @@ async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
         await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
         return
     
-    cz_code = message.text.strip()
+    cz_code = normalize_cz_code(message.text.strip())
     
     # Проверяем соответствие OUR_CODES
     from app.utils import get_ours_tokens

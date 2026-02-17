@@ -64,6 +64,12 @@ def get_ours_tokens() -> list[str]:
     ours_raw = os.getenv("OUR_CODES", "")
     return [item.strip() for item in ours_raw.replace(";", ",").split(",") if item.strip()]
 
+
+def normalize_cz_code(raw: str) -> str:
+    """Оставляет в коде ЧЗ только цифры."""
+    return "".join(c for c in raw if c.isdigit())
+
+
 def format_decoded_codes(codes: list[str]) -> str:
     return "\n".join(codes)
 
