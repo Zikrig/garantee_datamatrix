@@ -25,8 +25,8 @@ async def main() -> None:
     else:
         logging.warning("Admin group ID not found in database. Use /add command in group to set it.")
 
-    # Увеличенный таймаут (сек) для запросов к API, в т.ч. загрузка фото (избегаем Request timeout error)
-    session = AiohttpSession(timeout=120)
+    # Таймаут запросов к API (сек). 20 сек — быстрый отказ при проблемах с сетью/загрузкой фото
+    session = AiohttpSession(timeout=20)
     bot = Bot(token=token, session=session)
     dp = Dispatcher(storage=MemoryStorage())
 
