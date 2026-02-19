@@ -8,7 +8,17 @@ from aiogram.types import FSInputFile
 from app.scanner import extract_datamatrix
 from app.constants import CARE_TEXT, TRUST_TEXT
 
+# Корень проекта (родитель каталога app/) — для разрешения относительных путей к data/
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 KB_JSON_PATH = "kb.json"
+
+
+def _resolve_data_path(path: str) -> str:
+    """Преобразует относительный путь (например data/images/...) в абсолютный от корня проекта."""
+    if os.path.isabs(path):
+        return path
+    return os.path.normpath(os.path.join(_PROJECT_ROOT, path))
 
 CATALOG_URL = os.getenv("CATALOG_URL", "https://example.com/catalog")
 WB_URL = os.getenv("WB_URL", "https://www.wildberries.ru/")
@@ -98,14 +108,15 @@ async def send_cached_photo(bot: Bot, db, chat_id: int, photo_path: str, caption
         except Exception as e:
             logging.warning(f"Failed to send cached photo {photo_path}: {e}")
             # If failed, try re-uploading
-    
-    if not os.path.exists(photo_path):
-        logging.error(f"Photo file not found: {photo_path}")
+
+    resolved_path = _resolve_data_path(photo_path)
+    if not os.path.exists(resolved_path):
+        logging.error(f"Photo file not found: {resolved_path} (original: {photo_path})")
         await bot.send_message(chat_id, caption, reply_markup=reply_markup, parse_mode=parse_mode)
         return
 
     try:
-        photo = FSInputFile(photo_path)
+        photo = FSInputFile(resolved_path)
         msg = await bot.send_photo(chat_id, photo, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
         if msg.photo:
             new_file_id = msg.photo[-1].file_id
