@@ -103,7 +103,9 @@ async def admin_kb_links_menu_handler(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data.startswith("admin:kb_link_add:"))
 async def admin_kb_link_add_start(callback: CallbackQuery, state: FSMContext) -> None:
-    section = callback.data.split(":")[3]
+    parts = callback.data.split(":")
+    section = parts[2] if len(parts) > 2 else ""
+    await state.update_data(kb_section=section)
     await state.set_state(AdminStates.kb_add_link_label)
     await callback.message.edit_text("Введите название для новой ссылки:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data=f"admin:kb_links:{section}")]]))
     await callback.answer()
@@ -133,7 +135,10 @@ async def admin_kb_link_add_url(message: Message, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("admin:kb_link_del:"))
 async def admin_kb_link_del_handler(callback: CallbackQuery, state: FSMContext) -> None:
     parts = callback.data.split(":")
-    section, idx = parts[3], int(parts[4])
+    if len(parts) < 4:
+        await callback.answer("Ошибка формата")
+        return
+    section, idx = parts[2], int(parts[3])
     kb_data = load_kb()
     if "links" in kb_data and section in kb_data["links"]:
         if 0 <= idx < len(kb_data["links"][section]):
@@ -145,7 +150,10 @@ async def admin_kb_link_del_handler(callback: CallbackQuery, state: FSMContext) 
 @router.callback_query(F.data.startswith("admin:kb_link_edit:"))
 async def admin_kb_link_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
     parts = callback.data.split(":")
-    section, idx = parts[3], int(parts[4])
+    if len(parts) < 4:
+        await callback.answer("Ошибка формата")
+        return
+    section, idx = parts[2], int(parts[3])
     await state.update_data(kb_section=section, edit_link_idx=idx)
     await state.set_state(AdminStates.kb_edit_link_label)
     await callback.message.edit_text("Введите НОВОЕ название для ссылки:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data=f"admin:kb_links:{section}")]]))
