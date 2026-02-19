@@ -116,6 +116,7 @@ async def send_cached_photo(bot: Bot, db, chat_id: int, photo_path: str, caption
         return
 
     try:
+        await bot.send_chat_action(chat_id, "upload_photo")
         photo = FSInputFile(resolved_path)
         msg = await bot.send_photo(chat_id, photo, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
         if msg.photo:
