@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 
-import aiohttp
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -26,8 +25,8 @@ async def main() -> None:
     else:
         logging.warning("Admin group ID not found in database. Use /add command in group to set it.")
 
-    # Увеличенный таймаут для загрузки фото в Telegram (избегаем Request timeout error)
-    session = AiohttpSession(timeout=aiohttp.ClientTimeout(total=20))
+    # Увеличенный таймаут (сек) для запросов к API, в т.ч. загрузка фото (избегаем Request timeout error)
+    session = AiohttpSession(timeout=120)
     bot = Bot(token=token, session=session)
     dp = Dispatcher(storage=MemoryStorage())
 
