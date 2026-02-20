@@ -13,12 +13,42 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 KB_JSON_PATH = "kb.json"
 
+# JSON с кешем file_id для фото (пути к картинкам -> file_id). Пробрасывается в контейнер через volume.
+PHOTO_CACHE_JSON = os.getenv("PHOTO_CACHE_JSON", "data/photo_cache/photo_cache.json")
+
 
 def _resolve_data_path(path: str) -> str:
     """Преобразует относительный путь (например data/images/...) в абсолютный от корня проекта."""
     if os.path.isabs(path):
         return path
     return os.path.normpath(os.path.join(_PROJECT_ROOT, path))
+
+
+def _photo_cache_path() -> str:
+    return _resolve_data_path(PHOTO_CACHE_JSON)
+
+
+def _load_photo_cache() -> dict[str, str]:
+    """Читает кеш фото из JSON. Путь можно пробросить в контейнер через volume."""
+    path = _photo_cache_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception as e:
+        logging.warning(f"Could not load photo cache from {path}: {e}")
+        return {}
+
+
+def _save_photo_cache(cache: dict[str, str]) -> None:
+    """Сохраняет кеш фото в JSON (обе картинки после первого использования)."""
+    path = _photo_cache_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
 
 CATALOG_URL = os.getenv("CATALOG_URL", "https://example.com/catalog")
 WB_URL = os.getenv("WB_URL", "https://www.wildberries.ru/")
@@ -99,15 +129,18 @@ async def upsert_from_user(db, user) -> None:
 
 async def send_cached_photo(bot: Bot, db, chat_id: int, photo_path: str, caption: str, reply_markup=None, parse_mode=None) -> None:
     cache_key = f"file_id:{photo_path}"
-    file_id = await db.get_setting(cache_key)
-    
+    # Сначала проверяем JSON-кеш (можно пробросить с хоста и переносить между инстансами с тем же токеном)
+    file_id = _load_photo_cache().get(photo_path)
+    if not file_id:
+        file_id = await db.get_setting(cache_key)
+
     if file_id:
         try:
             await bot.send_photo(chat_id, file_id, caption=caption, reply_markup=reply_markup, parse_mode=parse_mode)
             return
         except Exception as e:
             logging.warning(f"Failed to send cached photo {photo_path}: {e}")
-            # If failed, try re-uploading
+            file_id = None
 
     resolved_path = _resolve_data_path(photo_path)
     if not os.path.exists(resolved_path):
@@ -122,6 +155,10 @@ async def send_cached_photo(bot: Bot, db, chat_id: int, photo_path: str, caption
         if msg.photo:
             new_file_id = msg.photo[-1].file_id
             await db.set_setting(cache_key, new_file_id)
+            # Сохраняем в JSON после первого использования (обе картинки попадут туда по мере отправки)
+            cache = _load_photo_cache()
+            cache[photo_path] = new_file_id
+            _save_photo_cache(cache)
     except Exception as e:
         logging.error(f"Failed to send/upload photo {photo_path}: {e}")
         await bot.send_message(chat_id, caption, reply_markup=reply_markup, parse_mode=parse_mode)
