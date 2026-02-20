@@ -118,14 +118,16 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
         if not data.get("receipt_date_wb"):
             await state.set_state(WarrantyStates.receipt_date_wb)
             await message.answer(
-                "Введите дату чека из Wildberries (например: 01.02.2025).",
+                "Введите дату чека из Wildberries (например: 01.02.2025).\n\n"
+                "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
                 reply_markup=cancel_kb(),
             )
             return
         if not data.get("receipt_number_wb"):
             await state.set_state(WarrantyStates.receipt_number_wb)
             await message.answer(
-                "Введите номер чека из Wildberries.",
+                "Введите номер чека из Wildberries.\n\n"
+                "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
                 reply_markup=cancel_kb(),
             )
             return
@@ -202,14 +204,6 @@ async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
         return
 
     cz_code = normalize_cz_code(codes[0])
-    if await db.is_cz_registered(cz_code):
-        await message.answer(
-            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
-            "Повторная регистрация одного и того же изделия невозможна.",
-            reply_markup=cancel_kb()
-        )
-        return
-
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)
@@ -235,14 +229,6 @@ async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
                 reply_markup=cancel_kb()
             )
             return
-    
-    if await db.is_cz_registered(cz_code):
-        await message.answer(
-            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
-            "Повторная регистрация одного и того же изделия невозможна.",
-            reply_markup=cancel_kb()
-        )
-        return
 
     if len(cz_code) < 10:
         await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())

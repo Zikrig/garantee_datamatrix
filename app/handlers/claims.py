@@ -269,15 +269,6 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
         return
 
     cz_code = normalize_cz_code(codes[0])
-    if await db.is_cz_registered(cz_code):
-        await message.answer(
-            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
-            "Пожалуйста, выберите это изделие из списка в начале или используйте другой код.",
-            reply_markup=main_menu_kb()
-        )
-        await state.clear()
-        return
-
     await state.update_data(cz_code=cz_code, cz_file_id=file_id)
     user_data = await db.get_user(message.from_user.id)
     await start_next_claim_reg_step(message, state, user_data)
@@ -303,15 +294,6 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
                 reply_markup=cancel_kb()
             )
             return
-    
-    if await db.is_cz_registered(cz_code):
-        await message.answer(
-            "⚠️ Этот код Честный знак уже зарегистрирован в системе.\n"
-            "Пожалуйста, выберите это изделие из списка в начале или используйте другой код.",
-            reply_markup=main_menu_kb()
-        )
-        await state.clear()
-        return
 
     if len(cz_code) < 10:
         await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
