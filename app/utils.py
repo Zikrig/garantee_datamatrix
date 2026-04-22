@@ -55,6 +55,8 @@ WB_URL = os.getenv("WB_URL", "https://www.wildberries.ru/brands/1021574-ukataka"
 TG_CHANNEL_URL = os.getenv("TG_CHANNEL_URL", "https://t.me/UkaTakaBrand")
 CERTS_URL = os.getenv("CERTS_URL", "https://ukataka.ru/blog")
 FAQ_URL = os.getenv("FAQ_URL", "https://ukataka.ru/kak-rabotaet-zaschita")
+TRUST_RESEARCH_URL = os.getenv("TRUST_RESEARCH_URL", "https://ukataka.ru/kak-rabotaet-zaschita")
+FABRIC_TEST_URL = os.getenv("FABRIC_TEST_URL", "https://ukataka.ru/blog/7byy9dn2k1-kak-mi-testiruem-tkan")
 
 ADMIN_CHAT_IDS_RAW = os.getenv("ADMIN_CHAT_IDS", "")
 ADMIN_CHAT_IDS = [
@@ -78,8 +80,8 @@ DEFAULT_KB = {
             {"label": "Лайфхаки в Telegram", "url": TG_CHANNEL_URL}
         ],
         "trust": [
-            {"label": "Исследования и сертификаты", "url": "https://ukataka.ru/kak-rabotaet-zaschita"},
-            {"label": "Проверяем ткань", "url": "https://ukataka.ru/blog/7byy9dn2k1-kak-mi-testiruem-tkan"}
+            {"label": "Исследования и сертификаты", "url": TRUST_RESEARCH_URL},
+            {"label": "Проверяем ткань", "url": FABRIC_TEST_URL}
         ],
         "faq": [
             {"label": "Подробно о SPF UPF", "url": FAQ_URL}
