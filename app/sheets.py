@@ -31,27 +31,36 @@ async def sync_to_sheets():
         logging.error("SPREADSHEET_ID not found in environment variables")
         return
 
+    logging.info("Sheets sync started")
+    logging.info(f"Target spreadsheet_id: {spreadsheet_id}")
+
     client = await asyncio.to_thread(get_gspread_client)
     if not client:
+        logging.error("Sheets sync aborted: gspread client is not available")
         return
 
     try:
         # Get unsynced data
         unsynced = await db.get_unsynced_warranties()
+        logging.info(f"Unsynced warranties found: {len(unsynced)}")
         if not unsynced:
             logging.info("No new warranties to sync to Google Sheets")
             return
 
         spreadsheet = await asyncio.to_thread(client.open_by_key, spreadsheet_id)
+        logging.info("Spreadsheet opened successfully")
         worksheets = await asyncio.to_thread(spreadsheet.worksheets)
+        logging.info(f"Worksheets found: {len(worksheets)}")
         if not worksheets:
             logging.error("No worksheets found in spreadsheet")
             return
         sheet = worksheets[0]
+        logging.info(f"Using worksheet[0]: title='{sheet.title}'")
         
         # Проверяем, есть ли заголовки в первой строке
         existing_data = await asyncio.to_thread(sheet.get_all_values)
         headers = ["Name", "Phone", "Email", "Username", "CZ Code", "Date", "SKU", "Start Date"]
+        logging.info(f"Current sheet rows count (including header): {len(existing_data)}")
         
         # Проверяем первую строку
         if not existing_data or len(existing_data) == 0:
@@ -62,6 +71,8 @@ async def sync_to_sheets():
             # Первая строка не содержит правильные заголовки - обновляем её
             logging.info("Updating headers in Google Sheets")
             await asyncio.to_thread(sheet.update, "A1:H1", [headers])
+        else:
+            logging.info("Headers are already up to date")
         
         # Prepare rows
         # Columns: Name, Phone, Email, Username, CZ Code, Date, SKU, Start Date
@@ -80,15 +91,21 @@ async def sync_to_sheets():
             ])
             warranty_ids.append(w["id"])
 
+        logging.info(f"Prepared rows for append: {len(rows)}")
+        if warranty_ids:
+            logging.info(f"Warranty IDs to mark as synced: {warranty_ids}")
+
         # Append rows to sheet
         await asyncio.to_thread(sheet.append_rows, rows)
+        logging.info("Rows appended to Google Sheets successfully")
         
         # Mark as synced in DB
         await db.mark_as_synced(warranty_ids)
+        logging.info(f"Marked as synced in DB: {len(warranty_ids)}")
         logging.info(f"Successfully synced {len(rows)} warranties to Google Sheets")
         
     except Exception as e:
-        logging.error(f"Error during Google Sheets sync: {e}")
+        logging.exception(f"Error during Google Sheets sync: {e}")
 
 async def sheets_sync_scheduler():
     logging.info("Starting Google Sheets sync scheduler (every 10 minutes)")
