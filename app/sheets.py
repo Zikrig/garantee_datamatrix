@@ -52,7 +52,7 @@ async def sync_to_sheets():
         
         # Проверяем, есть ли заголовки в первой строке
         existing_data = await asyncio.to_thread(sheet.get_all_values)
-        headers = ["Email", "Username", "CZ Code", "Date", "SKU"]
+        headers = ["Name", "Phone", "Email", "Username", "CZ Code", "Date", "SKU", "Start Date"]
         
         # Проверяем первую строку
         if not existing_data or len(existing_data) == 0:
@@ -62,19 +62,22 @@ async def sync_to_sheets():
         elif not existing_data[0] or existing_data[0] != headers:
             # Первая строка не содержит правильные заголовки - обновляем её
             logging.info("Updating headers in Google Sheets")
-            await asyncio.to_thread(sheet.update, "A1:E1", [headers])
+            await asyncio.to_thread(sheet.update, "A1:H1", [headers])
         
         # Prepare rows
-        # Columns: Email, Username, CZ Code, Date, SKU
+        # Columns: Name, Phone, Email, Username, CZ Code, Date, SKU, Start Date
         rows = []
         warranty_ids = []
         for w in unsynced:
             rows.append([
+                w.get("name") or "-",
+                w.get("phone") or "-",
                 w.get("email") or "-",
                 f"@{w.get('username')}" if w.get('username') else "-",
                 w.get("cz_code") or "-",
                 w.get("created_at") or "-",
-                w.get("sku") or "-"
+                w.get("sku") or "-",
+                w.get("start_date") or "-"
             ])
             warranty_ids.append(w["id"])
 

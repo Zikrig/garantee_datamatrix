@@ -427,7 +427,7 @@ class Database:
             db.row_factory = aiosqlite.Row
             cur = await db.execute(
                 """
-                SELECT w.*, u.username, u.email 
+                SELECT w.*, u.username, u.email, u.name, u.phone
                 FROM warranties w 
                 LEFT JOIN users u ON w.tg_id = u.tg_id 
                 WHERE w.synced = 0
