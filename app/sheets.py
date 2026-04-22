@@ -26,6 +26,7 @@ def get_gspread_client():
 
 async def sync_to_sheets():
     spreadsheet_id = os.getenv("SPREADSHEET_ID")
+    sheet_name = os.getenv("SHEET_NAME")
     
     if not spreadsheet_id:
         logging.error("SPREADSHEET_ID not found in environment variables")
@@ -43,12 +44,22 @@ async def sync_to_sheets():
             return
 
         spreadsheet = await asyncio.to_thread(client.open_by_key, spreadsheet_id)
-        # Используем индекс 0 (первый лист) вместо имени
-        worksheets = await asyncio.to_thread(spreadsheet.worksheets)
-        if not worksheets:
-            logging.error("No worksheets found in spreadsheet")
-            return
-        sheet = worksheets[0]
+        if sheet_name:
+            try:
+                sheet = await asyncio.to_thread(spreadsheet.worksheet, sheet_name)
+            except Exception:
+                logging.warning(f"Worksheet '{sheet_name}' not found, fallback to first sheet")
+                worksheets = await asyncio.to_thread(spreadsheet.worksheets)
+                if not worksheets:
+                    logging.error("No worksheets found in spreadsheet")
+                    return
+                sheet = worksheets[0]
+        else:
+            worksheets = await asyncio.to_thread(spreadsheet.worksheets)
+            if not worksheets:
+                logging.error("No worksheets found in spreadsheet")
+                return
+            sheet = worksheets[0]
         
         # Проверяем, есть ли заголовки в первой строке
         existing_data = await asyncio.to_thread(sheet.get_all_values)
