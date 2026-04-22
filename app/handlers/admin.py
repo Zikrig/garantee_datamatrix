@@ -9,6 +9,7 @@ from app.database import db
 from app.keyboards import admin_menu_kb, claims_list_kb, claim_status_kb
 from app.utils import ADMIN_CHAT_IDS, get_or_create_user_thread
 from app.states import AdminStates
+from app.sheets import sync_to_sheets
 
 router = Router()
 
@@ -223,4 +224,18 @@ async def comment_handler(message: Message) -> None:
     await db.update_claim_comment(claim_id, comment)
     await message.answer("Комментарий сохранен.")
     await message.bot.send_message(claim["tg_id"], f"Комментарий менеджера по заявке {claim_id}:\n{comment}")
+
+
+@router.message(Command("table"))
+async def table_sync_handler(message: Message) -> None:
+    if not ADMIN_CHAT_IDS or message.from_user.id not in ADMIN_CHAT_IDS:
+        return
+
+    await message.answer("⏳ Запускаю синхронизацию таблицы...")
+    try:
+        await sync_to_sheets()
+        await message.answer("✅ Синхронизация с Google Sheets завершена.")
+    except Exception as e:
+        logging.exception("Manual sheets sync failed")
+        await message.answer(f"❌ Ошибка синхронизации: {e}")
 
