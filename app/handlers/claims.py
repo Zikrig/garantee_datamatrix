@@ -23,6 +23,12 @@ from app.receipt_parser import parse_receipt_pdf
 
 router = Router()
 
+RECEIPT_PDF_MANUAL = (
+    "\n\n📌 в Личном Кабинете ВБ – Профиль – Данные и настройки – Оплата – чеки – "
+    "находим свой чек – нажимаем «Распечатать», видим предварительный просмотр – "
+    "нажимаем три точки в верхнем правом углу – «Сохранить как PDF»."
+)
+
 @router.message(F.text == "🛠 Обращение по изделию")
 @router.message(Command("claim"))
 async def claim_start_handler(message: Message, state: FSMContext) -> None:
@@ -347,15 +353,27 @@ async def claim_purchase_sku_handler(message: Message, state: FSMContext) -> Non
 async def claim_purchase_receipt_file_handler(message: Message, state: FSMContext) -> None:
     # Проверяем, что это PDF файл, а не фото
     if message.photo:
-        await message.answer("❌ Фото не принимается. Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
+        await message.answer(
+            "❌ Фото не принимается. Пожалуйста, отправьте файл PDF чека с Wildberries."
+            f"{RECEIPT_PDF_MANUAL}",
+            reply_markup=cancel_kb(),
+        )
         return
     
     if not message.document:
-        await message.answer("❌ Пожалуйста, отправьте файл PDF чека с Wildberries.", reply_markup=cancel_kb())
+        await message.answer(
+            "❌ Пожалуйста, отправьте файл PDF чека с Wildberries."
+            f"{RECEIPT_PDF_MANUAL}",
+            reply_markup=cancel_kb(),
+        )
         return
     
     if message.document.mime_type != "application/pdf":
-        await message.answer("❌ Принимаются только PDF файлы. Пожалуйста, отправьте файл PDF чека.", reply_markup=cancel_kb())
+        await message.answer(
+            "❌ Принимаются только PDF файлы. Пожалуйста, отправьте файл PDF чека."
+            f"{RECEIPT_PDF_MANUAL}",
+            reply_markup=cancel_kb(),
+        )
         return
     
     file_id = message.document.file_id
@@ -423,7 +441,8 @@ async def claim_description_handler(message: Message, state: FSMContext) -> None
     if not data.get("receipt_file_id") and not data.get("no_file"):
         await state.set_state(ClaimStates.purchase_receipt_file)
         await message.answer(
-            "Отправьте файл (PDF) чека с Wildberries.",
+            "Отправьте файл (PDF) чека с Wildberries."
+            f"{RECEIPT_PDF_MANUAL}",
             reply_markup=cancel_kb(),
         )
         return

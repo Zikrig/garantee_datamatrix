@@ -105,8 +105,8 @@ async def shopping_callback_handler(callback: CallbackQuery) -> None:
     await callback.answer()
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Каталог", url=os.getenv("CATALOG_URL", "https://example.com/catalog"))],
-            [InlineKeyboardButton(text="Wildberries", url=os.getenv("WB_URL", "https://www.wildberries.ru/"))],
+            [InlineKeyboardButton(text="Каталог", url=os.getenv("CATALOG_URL", "https://ukataka.ru/#katalog"))],
+            [InlineKeyboardButton(text="Wildberries", url=os.getenv("WB_URL", "https://www.wildberries.ru/brands/1021574-ukataka"))],
         ]
     )
     await callback.message.answer("Выберите, куда перейти:", reply_markup=kb)

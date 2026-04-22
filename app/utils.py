@@ -50,11 +50,11 @@ def _save_photo_cache(cache: dict[str, str]) -> None:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
-CATALOG_URL = os.getenv("CATALOG_URL", "https://example.com/catalog")
-WB_URL = os.getenv("WB_URL", "https://www.wildberries.ru/")
-TG_CHANNEL_URL = os.getenv("TG_CHANNEL_URL", "https://t.me/your_channel")
-CERTS_URL = os.getenv("CERTS_URL", "https://example.com/certs")
-FAQ_URL = os.getenv("FAQ_URL", "https://example.com/faq")
+CATALOG_URL = os.getenv("CATALOG_URL", "https://ukataka.ru/#katalog")
+WB_URL = os.getenv("WB_URL", "https://www.wildberries.ru/brands/1021574-ukataka")
+TG_CHANNEL_URL = os.getenv("TG_CHANNEL_URL", "https://t.me/UkaTakaBrand")
+CERTS_URL = os.getenv("CERTS_URL", "https://ukataka.ru/blog")
+FAQ_URL = os.getenv("FAQ_URL", "https://ukataka.ru/kak-rabotaet-zaschita")
 
 ADMIN_CHAT_IDS_RAW = os.getenv("ADMIN_CHAT_IDS", "")
 ADMIN_CHAT_IDS = [
@@ -72,17 +72,17 @@ DEFAULT_KB = {
         "useful": [
             {"label": "Наш каталог", "url": CATALOG_URL},
             {"label": "Наш канал", "url": TG_CHANNEL_URL},
-            {"label": "Сертификаты", "url": CERTS_URL}
+            {"label": "Исследования", "url": CERTS_URL}
         ],
         "care": [
             {"label": "Лайфхаки в Telegram", "url": TG_CHANNEL_URL}
         ],
         "trust": [
-            {"label": "Исследования и сертификаты", "url": CERTS_URL},
-            {"label": "Перейти в Telegram", "url": TG_CHANNEL_URL}
+            {"label": "Исследования и сертификаты", "url": "https://ukataka.ru/kak-rabotaet-zaschita"},
+            {"label": "Проверяем ткань", "url": "https://ukataka.ru/blog/7byy9dn2k1-kak-mi-testiruem-tkan"}
         ],
         "faq": [
-            {"label": "Подробнее", "url": FAQ_URL}
+            {"label": "Подробно о SPF UPF", "url": FAQ_URL}
         ]
     }
 }
