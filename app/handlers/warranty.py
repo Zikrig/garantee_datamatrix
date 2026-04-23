@@ -1,40 +1,31 @@
-import asyncio
 import datetime as dt
-import io
-import logging
-import os
 import uuid
 
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 
 from app.database import db
 from app.states import WarrantyStates
 from app.keyboards import main_menu_kb, cancel_kb
-from app.utils import upsert_from_user, decode_image, send_cached_photo, normalize_cz_code
+from app.utils import upsert_from_user
 from app.constants import WARRANTY_LEGAL_TEXT
 
 router = Router()
 
+
+def _parse_sku_list(raw: str) -> list[str]:
+    text = (raw or "").replace("\n", ",")
+    items = [item.strip() for item in text.split(",")]
+    # Preserve order and skip empty values
+    return [item for item in items if item]
+
+
 async def start_warranty_activation(message: Message, state: FSMContext) -> None:
-    await state.set_state(WarrantyStates.cz_photo)
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-    ])
-    
-    await send_cached_photo(
-        message.bot, 
-        db, 
-        message.chat.id, 
-        "data/images/chz2.png",
-        "🔐 Активируйте расширенную гарантию 12 месяцев.\n"
-        "Отправьте СЮДА фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК». Сделай четкое фото всей бирки ,которая прикреплена к тунике (с надписью «ЧЕСТНЫЙ ЗНАК») целиком, чтобы в кадре была только она.",
-        reply_markup=kb,
-    )
+    await state.clear()
+    user_data = await db.get_user(message.from_user.id)
+    await start_next_registration_step(message, state, user_data or {})
 
 @router.message(F.text == "🔐 Активировать гарантию 12 месяцев")
 @router.message(Command("warranty"))
@@ -64,23 +55,7 @@ async def warranty_new_callback_handler(callback: CallbackQuery, state: FSMConte
     await callback.answer()
     await start_warranty_activation(callback.message, state)
 
-@router.callback_query(F.data == "warranty:cz_text_start")
-async def warranty_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.set_state(WarrantyStates.cz_text)
-    await send_cached_photo(
-        callback.message.bot,
-        db,
-        callback.message.chat.id,
-        "data/images/chz_code.png",
-        "Введите код Честный знак вручную.\n\n"
-        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
-        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
-        reply_markup=cancel_kb()
-    )
-
 async def start_next_registration_step(message: Message, state: FSMContext, user_data: dict) -> None:
-    current_state = await state.get_state()
     data = await state.get_data()
 
     # Determine which contact info is missing
@@ -103,140 +78,35 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
         await message.answer("Введите вашу электронную почту.", reply_markup=cancel_kb())
         return
 
-    # If all contact info is present, move to SKU
-    if current_state in [WarrantyStates.cz_photo, WarrantyStates.cz_text, WarrantyStates.name, WarrantyStates.phone, WarrantyStates.email]:
-        if not data.get("sku"):
-            await state.set_state(WarrantyStates.sku)
-            await message.answer(
-                "введите артикул товара – это цифры с этикетки за словом «Артикул»",
-                reply_markup=cancel_kb(),
-            )
-            return
-
-    # После артикула — дата и номер чека из WB
-    if current_state in [WarrantyStates.sku, WarrantyStates.receipt_date_wb, WarrantyStates.receipt_number_wb]:
-        if not data.get("receipt_date_wb"):
-            await state.set_state(WarrantyStates.receipt_date_wb)
-            await message.answer(
-                "Введите дату чека из Wildberries (например: 01.02.2025).\n\n"
-                "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
-                reply_markup=cancel_kb(),
-            )
-            return
-        if not data.get("receipt_number_wb"):
-            await state.set_state(WarrantyStates.receipt_number_wb)
-            await message.answer(
-                "Введите номер чека из Wildberries.\n\n"
-                "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
-                reply_markup=cancel_kb(),
-            )
-            return
-
-    # If everything is done, finalize
-    await finalize_warranty(message, state, data.get("name") or user_data.get("name"))
-
-@router.message(WarrantyStates.cz_photo)
-async def warranty_cz_handler(message: Message, state: FSMContext) -> None:
-    photo = message.photo[-1] if message.photo else None
-    document = message.document if message.document else None
-    
-    data = await state.get_data()
-    failures = data.get("cz_failures", 0)
-
-    if not photo and not document:
-        await message.answer("Нужна фотография бирки изделия или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ]))
-        return
-
-    file_id = photo.file_id if photo else document.file_id
-    status_msg = await message.answer("🔍 Распознаю код... Это может занять несколько секунд.")
-    
-    try:
-        file = await message.bot.get_file(file_id)
-        buffer = io.BytesIO()
-        try:
-            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=buffer), timeout=30)
-        except asyncio.TimeoutError:
-            await message.answer("⚠️ Ошибка: Время ожидания истекло. Пожалуйста, попробуйте отправить фото еще раз.", reply_markup=cancel_kb())
-            return
-        except Exception as e:
-            logging.error(f"Download error: {e}")
-            await message.answer("⚠️ Произошла ошибка при загрузке фото. Попробуйте еще раз.", reply_markup=cancel_kb())
-            return
-            
-        codes, is_ours = await decode_image(buffer.getvalue())
-    finally:
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-    if not codes or not is_ours:
-        failures += 1
-        await state.update_data(cz_failures=failures)
-        
-        if failures >= 2:
-            await state.set_state(WarrantyStates.cz_text)
-            await send_cached_photo(
-                message.bot,
-                db,
-                message.chat.id,
-                "data/images/chz_code.png",
-                "⚠️ Не удалось распознать фото.\n\n"
-                "Введите ЦИФРОВУЮ часть кода ЧЗ вручную - первые символы, обычно их от 12 до 20.",
-                reply_markup=cancel_kb()
-            )
-            return
-
-        error_text = "Не удалось прочитать код. Попробуйте более четкое фото."
-        if codes and not is_ours:
-            error_text = f"Код не относится к нашей продукции: {codes[0]}\nПожалуйста, отправьте корректный код ЧЗ."
-        
+    if not data.get("sku_list"):
+        await state.set_state(WarrantyStates.sku)
         await message.answer(
-            error_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="warranty:cz_text_start")],
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-            ])
+            "Введите артикул товара.\n"
+            "Если изделий несколько, отправьте артикулы через запятую.",
+            reply_markup=cancel_kb(),
         )
         return
 
-    cz_code = normalize_cz_code(codes[0])
-    await state.update_data(cz_code=cz_code, cz_file_id=file_id)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_registration_step(message, state, user_data)
-
-@router.message(WarrantyStates.cz_text)
-async def warranty_cz_text_handler(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
-        return
-    
-    cz_code = normalize_cz_code(message.text.strip())
-    
-    # Проверяем соответствие OUR_CODES
-    from app.utils import get_ours_tokens
-    tokens = get_ours_tokens()
-    
-    if tokens:
-        code_valid = any(token in cz_code for token in tokens)
-        if not code_valid:
-            await message.answer(
-                "❌ Код не относится к нашей продукции.\n"
-                "Пожалуйста, проверьте код и введите еще раз. Код должен содержать один из наших идентификаторов.",
-                reply_markup=cancel_kb()
-            )
-            return
-
-    if len(cz_code) < 10:
-        await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
+    if not data.get("receipt_date_wb"):
+        await state.set_state(WarrantyStates.receipt_date_wb)
+        await message.answer(
+            "Введите дату чека из Wildberries (например: 01.02.2025).\n\n"
+            "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
+            reply_markup=cancel_kb(),
+        )
         return
 
-    await state.update_data(cz_code=cz_code, cz_file_id=None)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_registration_step(message, state, user_data)
+    if not data.get("receipt_number_wb"):
+        await state.set_state(WarrantyStates.receipt_number_wb)
+        await message.answer(
+            "Введите номер чека из Wildberries.\n\n"
+            "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки туники и посмотреть.",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    # If everything is done, finalize
+    await finalize_warranty(message, state, data.get("name") or user_data.get("name"))
 
 @router.message(WarrantyStates.name)
 async def warranty_name_handler(message: Message, state: FSMContext) -> None:
@@ -272,8 +142,16 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
     if not message.text:
         await message.answer("Пожалуйста, введите артикул товара текстом.", reply_markup=cancel_kb())
         return
-    
-    await state.update_data(sku=message.text)
+
+    sku_list = _parse_sku_list(message.text)
+    if not sku_list:
+        await message.answer(
+            "Не удалось распознать артикулы. Введите один артикул или список через запятую.",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    await state.update_data(sku_list=sku_list)
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)
 
@@ -311,7 +189,7 @@ async def warranty_receipt_number_wb_handler(message: Message, state: FSMContext
 
 async def finalize_warranty(message: Message, state: FSMContext, name: str) -> None:
     data = await state.get_data()
-    warranty_id = uuid.uuid4().hex[:8]
+    sku_list = data.get("sku_list") or []
     
     # Update user contact info in DB if it was just collected
     if data.get("name") or data.get("phone") or data.get("email"):
@@ -321,17 +199,22 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         if data.get("email"):
             await db.update_user_email(message.from_user.id, data["email"])
 
-    start_date, end_date = await db.create_warranty(
-        warranty_id=warranty_id,
-        tg_id=message.from_user.id,
-        cz_code=data["cz_code"],
-        cz_file_id=data.get("cz_file_id"),
-        receipt_file_id=None,
-        sku=data["sku"],
-        receipt_date=data.get("receipt_date_wb"),
-        receipt_text=data.get("receipt_number_wb"),
-        receipt_items=None
-    )
+    end_date = ""
+    for sku in sku_list:
+        warranty_id = uuid.uuid4().hex[:8]
+        # Keep cz_code populated for backward compatibility with existing schema/flows.
+        fallback_cz_code = f"no-cz-{warranty_id}"
+        _, end_date = await db.create_warranty(
+            warranty_id=warranty_id,
+            tg_id=message.from_user.id,
+            cz_code=fallback_cz_code,
+            cz_file_id=None,
+            receipt_file_id=None,
+            sku=sku,
+            receipt_date=data.get("receipt_date_wb"),
+            receipt_text=data.get("receipt_number_wb"),
+            receipt_items=None,
+        )
     
     try:
         display_end_date = dt.date.fromisoformat(end_date).strftime("%d.%m.%Y")
@@ -339,7 +222,7 @@ async def finalize_warranty(message: Message, state: FSMContext, name: str) -> N
         display_end_date = end_date
 
     await message.answer(
-        f"✅ Регистрация завершена! Гарантия активирована.\n\n"
+        f"✅ Регистрация завершена! Гарантия активирована для {len(sku_list)} изделий.\n\n"
         f"📅 Гарантия действует до: <b>{display_end_date}</b>\n\n"
         f"{WARRANTY_LEGAL_TEXT}",
         reply_markup=main_menu_kb(),

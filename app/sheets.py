@@ -64,7 +64,6 @@ async def sync_to_sheets():
             "Phone",
             "Email",
             "Username",
-            "CZ Code",
             "Date",
             "SKU",
             "Receipt number",
@@ -80,7 +79,7 @@ async def sync_to_sheets():
         elif not existing_data[0] or existing_data[0] != headers:
             # Первая строка не содержит правильные заголовки - обновляем её
             logging.info("Updating headers in Google Sheets")
-            await asyncio.to_thread(sheet.update, "A1:I1", [headers])
+            await asyncio.to_thread(sheet.update, "A1:H1", [headers])
         else:
             logging.info("Headers are already up to date")
         
@@ -94,7 +93,6 @@ async def sync_to_sheets():
                 w.get("phone") or "-",
                 w.get("email") or "-",
                 f"@{w.get('username')}" if w.get('username') else "-",
-                w.get("cz_code") or "-",
                 w.get("created_at") or "-",
                 w.get("sku") or "-",
                 w.get("receipt_text") or "-",
