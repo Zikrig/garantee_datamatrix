@@ -82,6 +82,7 @@ async def start_next_registration_step(message: Message, state: FSMContext, user
         await state.set_state(WarrantyStates.sku)
         await message.answer(
             "Введите артикул товара.\n"
+            "(цифры на этикетке, которые идут после слова \"Артикул\")\n"
             "Если изделий несколько, отправьте артикулы через запятую.",
             reply_markup=cancel_kb(),
         )
