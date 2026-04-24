@@ -128,10 +128,31 @@ async def sheets_sync_scheduler():
         await asyncio.sleep(600)
 
 
-def _normalize_receipt_number(value: str | None) -> str:
-    if not value:
+def _normalize_receipt_number(value) -> str:
+    if value is None or value == "":
         return ""
     return "".join(ch for ch in str(value).strip().lower() if ch.isalnum())
+
+
+def _receipt_match_keys(value) -> set[str]:
+    """Возвращает набор вариантов нормализованного номера чека для устойчивого сравнения.
+    Учитывает случаи, когда ведущие нули могут теряться (например, Google Sheets
+    приводит "034" к числу 34)."""
+    norm = _normalize_receipt_number(value)
+    if not norm:
+        return set()
+    keys = {norm}
+    stripped = norm.lstrip("0")
+    if stripped:
+        keys.add(stripped)
+    return keys
+
+
+def receipts_match(a, b) -> bool:
+    """Сравнивает два номера чека с учётом возможной потери ведущих нулей."""
+    keys_a = _receipt_match_keys(a)
+    keys_b = _receipt_match_keys(b)
+    return bool(keys_a & keys_b)
 
 
 async def find_site_registration_by_receipt(receipt_number: str) -> dict | None:
@@ -141,8 +162,8 @@ async def find_site_registration_by_receipt(receipt_number: str) -> dict | None:
         logging.warning("SITE_TABLE_ID not found in environment variables")
         return None
 
-    normalized_target = _normalize_receipt_number(receipt_number)
-    if not normalized_target:
+    target_keys = _receipt_match_keys(receipt_number)
+    if not target_keys:
         return None
 
     client = await asyncio.to_thread(get_gspread_client)
@@ -158,8 +179,8 @@ async def find_site_registration_by_receipt(receipt_number: str) -> dict | None:
         # Header is expected in row 1, data starts from row 2
         records = await asyncio.to_thread(sheet.get_all_records)
         for row in records:
-            row_receipt = _normalize_receipt_number(row.get("Номер_чека"))
-            if row_receipt and row_receipt == normalized_target:
+            row_keys = _receipt_match_keys(row.get("Номер_чека"))
+            if row_keys and target_keys & row_keys:
                 return {
                     "name": row.get("Name"),
                     "phone": row.get("Phone"),

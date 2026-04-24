@@ -423,24 +423,33 @@ class Database:
             return row[0] if row else 0
 
     async def find_warranties_by_receipt(self, receipt_number: str, tg_id: int | None = None) -> list[dict[str, Any]]:
-        """Ищет гарантии по номеру чека (receipt_text). Если указан tg_id, ограничивает выборку этим пользователем."""
+        """Ищет гарантии по номеру чека (receipt_text) с устойчивой нормализацией
+        (без учёта регистра, пробелов, спецсимволов и ведущих нулей).
+        Если указан tg_id, ограничивает выборку этим пользователем."""
         if not receipt_number or not str(receipt_number).strip():
             return []
-        value = str(receipt_number).strip()
-        async with aiosqlite.connect(self.path) as db:
-            db.row_factory = aiosqlite.Row
+
+        from app.sheets import receipts_match
+
+        async with aiosqlite.connect(self.path) as conn:
+            conn.row_factory = aiosqlite.Row
             if tg_id is not None:
-                cur = await db.execute(
-                    "SELECT * FROM warranties WHERE receipt_text=? AND tg_id=?",
-                    (value, tg_id),
+                cur = await conn.execute(
+                    "SELECT * FROM warranties WHERE receipt_text IS NOT NULL AND receipt_text != '' AND tg_id=?",
+                    (tg_id,),
                 )
             else:
-                cur = await db.execute(
-                    "SELECT * FROM warranties WHERE receipt_text=?",
-                    (value,),
+                cur = await conn.execute(
+                    "SELECT * FROM warranties WHERE receipt_text IS NOT NULL AND receipt_text != ''"
                 )
             rows = await cur.fetchall()
-            return [dict(row) for row in rows]
+
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            row_dict = dict(row)
+            if receipts_match(row_dict.get("receipt_text"), receipt_number):
+                result.append(row_dict)
+        return result
 
     async def get_unsynced_warranties(self) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.path) as db:
