@@ -127,3 +127,49 @@ async def sheets_sync_scheduler():
         # Wait for 10 minutes (600 seconds)
         await asyncio.sleep(600)
 
+
+def _normalize_receipt_number(value: str | None) -> str:
+    if not value:
+        return ""
+    return "".join(ch for ch in str(value).strip().lower() if ch.isalnum())
+
+
+async def find_site_registration_by_receipt(receipt_number: str) -> dict | None:
+    """Find registration row in SITE_TABLE_ID by receipt number."""
+    site_table_id = os.getenv("SITE_TABLE_ID")
+    if not site_table_id:
+        logging.warning("SITE_TABLE_ID not found in environment variables")
+        return None
+
+    normalized_target = _normalize_receipt_number(receipt_number)
+    if not normalized_target:
+        return None
+
+    client = await asyncio.to_thread(get_gspread_client)
+    if not client:
+        return None
+
+    try:
+        spreadsheet = await asyncio.to_thread(client.open_by_key, site_table_id)
+        worksheets = await asyncio.to_thread(spreadsheet.worksheets)
+        if not worksheets:
+            return None
+        sheet = worksheets[0]
+        # Header is expected in row 1, data starts from row 2
+        records = await asyncio.to_thread(sheet.get_all_records)
+        for row in records:
+            row_receipt = _normalize_receipt_number(row.get("Номер_чека"))
+            if row_receipt and row_receipt == normalized_target:
+                return {
+                    "name": row.get("Name"),
+                    "phone": row.get("Phone"),
+                    "email": row.get("Email"),
+                    "sku": row.get("Артикул"),
+                    "receipt_number": row.get("Номер_чека"),
+                    "purchase_date": row.get("Дата_покупки") or row.get("Дата_чека_с_ВБ"),
+                    "products": row.get("products"),
+                }
+    except Exception as e:
+        logging.exception(f"Failed to lookup receipt in SITE_TABLE_ID: {e}")
+    return None
+
