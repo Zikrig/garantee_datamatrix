@@ -1,7 +1,5 @@
-import asyncio
 import io
 import logging
-import os
 import uuid
 import datetime as dt
 from html import escape
@@ -18,7 +16,7 @@ from app.keyboards import (
     main_menu_kb, cancel_kb, purchase_type_kb, files_kb, 
     skip_kb, warranties_selection_kb, claim_status_kb
 )
-from app.utils import upsert_from_user, decode_image, format_decoded_codes, send_admin_claim, send_cached_photo, normalize_cz_code
+from app.utils import upsert_from_user, send_admin_claim
 from app.receipt_parser import parse_receipt_pdf
 from app.sheets import find_site_registration_by_receipt
 
@@ -40,11 +38,11 @@ async def claim_start_handler(message: Message, state: FSMContext) -> None:
         await message.answer(
             "Чтобы оформить заявку по гарантии, вам необходимо зарегистрироваться.\n"
             "Это обеспечит вам 12 месяцев гарантийного обслуживания.\n\n"
-            "Если гарантия была оформлена через сайт, можно продолжить по номеру чека.",
+            "Если вы уже регистрировали гарантию на сайте, можно продолжить по номеру чека с ВБ.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🔐 Активировать гарантию 12 месяцев", callback_data="menu:warranty")],
-                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claimflow:site_start")],
+                    [InlineKeyboardButton(text="🧾 Ввести номер чека с ВБ", callback_data="claimflow:site_start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
                 ]
             )
@@ -67,11 +65,11 @@ async def claim_start_callback_handler(callback: CallbackQuery, state: FSMContex
         await callback.message.answer(
             "Чтобы оформить заявку по гарантии, вам необходимо зарегистрироваться.\n"
             "Это обеспечит вам 12 месяцев гарантийного обслуживания.\n\n"
-            "Если гарантия была оформлена через сайт, можно продолжить по номеру чека.",
+            "Если вы уже регистрировали гарантию на сайте, можно продолжить по номеру чека с ВБ.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🔐 Активировать гарантию 12 месяцев", callback_data="menu:warranty")],
-                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claimflow:site_start")],
+                    [InlineKeyboardButton(text="🧾 Ввести номер чека с ВБ", callback_data="claimflow:site_start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
                 ]
             )
@@ -119,10 +117,11 @@ async def start_next_claim_reg_step(message: Message, state: FSMContext, user_da
     # Once item is registered, move to problem description (чек запрашивается позже)
     # Save as warranty first
     warranty_id = uuid.uuid4().hex[:8]
+    cz_code_value = data.get("cz_code") or f"no-cz-{warranty_id}"
     await db.create_warranty(
         warranty_id=warranty_id,
         tg_id=message.from_user.id,
-        cz_code=data["cz_code"],
+        cz_code=cz_code_value,
         cz_file_id=data.get("cz_file_id"),
         receipt_file_id=data.get("receipt_file_id"),
         sku=data["sku"],
@@ -140,8 +139,8 @@ async def start_next_claim_reg_step(message: Message, state: FSMContext, user_da
             await db.update_user_email(message.from_user.id, data["email"])
 
     await state.update_data(
-        purchase_type="ЧЗ (новая гарантия)", 
-        purchase_value=data["cz_code"]
+        purchase_type="Новая гарантия",
+        purchase_value=data.get("receipt_text") or data.get("sku") or "-"
     )
     
     await state.set_state(ClaimStates.description)
@@ -157,14 +156,11 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     await callback.answer()
     data = callback.data
     if data == "select_w:other":
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🧾 Ввести номер чека с сайта", callback_data="claimflow:site_start")],
-            [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ])
+        await state.set_state(ClaimStates.purchase_site_receipt_number)
         await callback.message.answer(
-            "Выберите способ подтверждения для гарантийного обращения:",
-            reply_markup=kb,
+            "🧾 Введите номер чека с ВБ.\n\n"
+            "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки.",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -177,8 +173,8 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
         return
 
     await state.update_data(
-        purchase_type="ЧЗ (из гарантии)", 
-        purchase_value=selected["cz_code"], 
+        purchase_type="Зарегистрированная гарантия",
+        purchase_value=selected.get("receipt_text") or selected.get("sku") or "-",
         sku=selected.get("sku")
     )
     
@@ -191,158 +187,15 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     await state.set_state(ClaimStates.description)
     await callback.message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
 
-@router.callback_query(F.data == "claimflow:cz_text_start")
-async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.set_state(ClaimStates.purchase_cz_text)
-    await send_cached_photo(
-        callback.message.bot,
-        db,
-        callback.message.chat.id,
-        "data/images/chz_code.png",
-        "Введите код Честный знак вручную.\n\n"
-        "Рядом с вашим ЧЗ есть буквенно цифровой код. Он начинается примерно так: 01046. "
-        "Введите ЦИФРОВУЮ часть этого кода - первые символы, обычно их от 12 до 20.",
-        reply_markup=cancel_kb()
-    )
-
-
-@router.callback_query(F.data == "claimflow:cz_start")
-async def claim_cz_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer()
-    await state.set_state(ClaimStates.purchase_cz_photo)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-    ])
-    await send_cached_photo(
-        callback.message.bot,
-        db,
-        callback.message.chat.id,
-        "data/images/chz2.png",
-        "Чтобы получить расширенную гарантию, \n"
-        "отправьте фото бирки изделия с надписью «ЧЕСТНЫЙ ЗНАК»",
-        reply_markup=kb
-    )
-
-
 @router.callback_query(F.data == "claimflow:site_start")
 async def claim_site_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ClaimStates.purchase_site_receipt_number)
     await callback.message.answer(
-        "Введите номер чека из регистрации на сайте:",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
-            ]
-        ),
+        "🧾 Введите номер чека с ВБ.\n\n"
+        "📌 Смотреть: зайти в свой профиль на ВБ → оплата → чеки — открыть чек покупки.",
+        reply_markup=cancel_kb(),
     )
-
-@router.message(ClaimStates.purchase_cz_photo)
-async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -> None:
-    photo = message.photo[-1] if message.photo else None
-    document = message.document if message.document else None
-    
-    data = await state.get_data()
-    failures = data.get("cz_failures_claim", 0)
-
-    if not photo and not document:
-        await message.answer("Нужна фотография бирки изделия или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-        ]))
-        return
-
-    file_id = photo.file_id if photo else document.file_id
-    status_msg = await message.answer("🔍 Распознаю код... Это может занять несколько секунд.")
-    
-    try:
-        file = await message.bot.get_file(file_id)
-        buffer = io.BytesIO()
-        try:
-            await asyncio.wait_for(message.bot.download_file(file.file_path, destination=buffer), timeout=30)
-        except asyncio.TimeoutError:
-            await message.answer("⚠️ Ошибка: Время ожидания истекло. Пожалуйста, попробуйте отправить фото еще раз.", reply_markup=cancel_kb())
-            return
-        except Exception as e:
-            logging.error(f"Download error: {e}")
-            await message.answer("⚠️ Произошла ошибка при загрузке фото. Попробуйте еще раз.", reply_markup=cancel_kb())
-            return
-            
-        codes, is_ours = await decode_image(buffer.getvalue())
-    finally:
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
-
-    if not codes or not is_ours:
-        failures += 1
-        await state.update_data(cz_failures_claim=failures)
-        
-        if failures >= 2:
-            await state.set_state(ClaimStates.purchase_cz_text)
-            await send_cached_photo(
-                message.bot,
-                db,
-                message.chat.id,
-                "data/images/chz_code.png",
-                "⚠️ Не удалось распознать фото.\n\n"
-                "Введите ЦИФРОВУЮ часть кода ЧЗ вручную - первые символы, обычно их от 12 до 20.",
-                reply_markup=cancel_kb()
-            )
-            return
-
-        error_text = "Не удалось прочитать код. Попробуйте более четкое фото."
-        if codes and not is_ours:
-            error_text = f"Код не относится к нашей продукции: {codes[0]}\nПожалуйста, отправьте корректный код ЧЗ."
-        
-        await message.answer(
-            error_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-            ])
-        )
-        return
-
-    cz_code = normalize_cz_code(codes[0])
-    await state.update_data(cz_code=cz_code, cz_file_id=file_id)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_claim_reg_step(message, state, user_data)
-
-@router.message(ClaimStates.purchase_cz_text)
-async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) -> None:
-    if not message.text:
-        await message.answer("Пожалуйста, введите код текстом.", reply_markup=cancel_kb())
-        return
-    
-    cz_code = normalize_cz_code(message.text.strip())
-    
-    # Проверяем соответствие OUR_CODES
-    from app.utils import get_ours_tokens
-    tokens = get_ours_tokens()
-    
-    if tokens:
-        code_valid = any(token in cz_code for token in tokens)
-        if not code_valid:
-            await message.answer(
-                "❌ Код не относится к нашей продукции.\n"
-                "Пожалуйста, проверьте код и введите еще раз. Код должен содержать один из наших идентификаторов.",
-                reply_markup=cancel_kb()
-            )
-            return
-
-    if len(cz_code) < 10:
-        await message.answer("Код слишком короткий. Пожалуйста, проверьте и введите еще раз.", reply_markup=cancel_kb())
-        return
-
-    await state.update_data(cz_code=cz_code, cz_file_id=None)
-    user_data = await db.get_user(message.from_user.id)
-    await start_next_claim_reg_step(message, state, user_data)
-
 
 @router.message(ClaimStates.purchase_site_receipt_number)
 async def claim_site_receipt_text_handler(message: Message, state: FSMContext) -> None:
@@ -351,43 +204,71 @@ async def claim_site_receipt_text_handler(message: Message, state: FSMContext) -
         return
 
     receipt_number = message.text.strip()
-    site_data = await find_site_registration_by_receipt(receipt_number)
-    if not site_data:
+
+    # 1) Ищем в таблице бота (warranties.receipt_text)
+    bot_warranties = await db.find_warranties_by_receipt(receipt_number)
+    if bot_warranties:
+        w = bot_warranties[0]
+        await state.update_data(
+            purchase_type="ВБ (по номеру чека)",
+            purchase_value=w.get("receipt_text") or receipt_number,
+            receipt_text=w.get("receipt_text") or receipt_number,
+            receipt_date=w.get("receipt_date"),
+            receipt_items=w.get("receipt_items"),
+            sku=w.get("sku"),
+            no_file=True,
+        )
+        user_db = await db.get_user(message.from_user.id)
+        if not user_db or not user_db.get("name") or not user_db.get("phone") or not user_db.get("email"):
+            await start_next_claim_reg_step(message, state, user_db or {})
+            return
+        await state.set_state(ClaimStates.description)
         await message.answer(
-            "Не нашли такой номер чека в таблице сайта.\n"
-            "Проверьте номер и отправьте снова, либо используйте вариант через Честный Знак.",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
-                    [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
-                ]
-            ),
+            "✅ Чек найден в ваших зарегистрированных гарантиях.\n"
+            "Опишите ситуацию по изделию текстом.",
+            reply_markup=cancel_kb(),
         )
         return
 
-    await state.update_data(
-        purchase_type="Сайт (по номеру чека)",
-        purchase_value=site_data.get("receipt_number") or receipt_number,
-        receipt_text=site_data.get("receipt_number") or receipt_number,
-        receipt_date=site_data.get("purchase_date"),
-        receipt_items=site_data.get("products"),
-        sku=site_data.get("sku"),
-        no_file=True,  # Чек уже подтвержден в таблице сайта
-    )
+    # 2) Ищем в таблице сайта
+    site_data = await find_site_registration_by_receipt(receipt_number)
+    if site_data:
+        await state.update_data(
+            purchase_type="Сайт (по номеру чека)",
+            purchase_value=site_data.get("receipt_number") or receipt_number,
+            receipt_text=site_data.get("receipt_number") or receipt_number,
+            receipt_date=site_data.get("purchase_date"),
+            receipt_items=site_data.get("products"),
+            sku=site_data.get("sku"),
+            no_file=True,
+        )
+        if site_data.get("name"):
+            await state.update_data(name=str(site_data["name"]).strip())
+        if site_data.get("phone"):
+            await state.update_data(phone=str(site_data["phone"]).strip())
+        if site_data.get("email"):
+            await state.update_data(email=str(site_data["email"]).strip().lower())
 
-    # Подтягиваем контакты из формы сайта в текущую заявку, если они есть.
-    if site_data.get("name"):
-        await state.update_data(name=str(site_data["name"]).strip())
-    if site_data.get("phone"):
-        await state.update_data(phone=str(site_data["phone"]).strip())
-    if site_data.get("email"):
-        await state.update_data(email=str(site_data["email"]).strip().lower())
+        await state.set_state(ClaimStates.description)
+        await message.answer(
+            "✅ Чек найден в регистрации на сайте.\n"
+            "Опишите ситуацию по изделию текстом.",
+            reply_markup=cancel_kb(),
+        )
+        return
 
-    await state.set_state(ClaimStates.description)
+    # 3) Чек не найден нигде — предлагаем зарегистрировать гарантию
+    await state.clear()
     await message.answer(
-        "✅ Чек найден в регистрации на сайте.\n"
-        "Опишите ситуацию по изделию текстом.",
-        reply_markup=cancel_kb(),
+        "❌ Этот номер чека не найден ни в наших гарантиях, ни в регистрации на сайте.\n\n"
+        "Чтобы пользоваться сервисом и оформить обращение, активируйте гарантию — "
+        "это займёт меньше минуты.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔐 Активировать гарантию 12 месяцев", callback_data="menu:warranty")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
+            ]
+        ),
     )
 
 @router.message(ClaimStates.contact_name)

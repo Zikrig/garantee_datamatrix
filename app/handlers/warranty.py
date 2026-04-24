@@ -156,25 +156,66 @@ async def warranty_sku_handler(message: Message, state: FSMContext) -> None:
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)
 
+def _parse_receipt_date(raw: str) -> dt.date | None:
+    raw = (raw or "").strip()
+    # Принимаем DD.MM.YYYY, DD.MM.YY и YYYY-MM-DD
+    for fmt in ("%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d"):
+        try:
+            return dt.datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _months_ago(date_from: dt.date, months: int) -> dt.date:
+    """Возвращает дату, отстоящую ровно на N месяцев назад."""
+    month = date_from.month - months
+    year = date_from.year
+    while month <= 0:
+        month += 12
+        year -= 1
+    day = min(date_from.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                               31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+    return dt.date(year, month, day)
+
+
+# Максимальный «возраст» чека при регистрации гарантии — 2 месяца
+RECEIPT_MAX_AGE_MONTHS = 2
+
+
 @router.message(WarrantyStates.receipt_date_wb)
 async def warranty_receipt_date_wb_handler(message: Message, state: FSMContext) -> None:
     if not message.text:
         await message.answer("Пожалуйста, введите дату чека текстом.", reply_markup=cancel_kb())
         return
     raw = message.text.strip()
-    # Принимаем DD.MM.YYYY или YYYY-MM-DD
-    for fmt in ("%d.%m.%Y", "%Y-%m-%d"):
-        try:
-            dt.datetime.strptime(raw, fmt)
-            break
-        except ValueError:
-            continue
-    else:
+    parsed = _parse_receipt_date(raw)
+    if not parsed:
         await message.answer(
             "Неверный формат даты. Введите дату в формате ДД.ММ.ГГГГ (например: 01.02.2025).",
             reply_markup=cancel_kb(),
         )
         return
+
+    today = dt.date.today()
+    if parsed > today:
+        await message.answer(
+            "⚠️ Дата чека не может быть в будущем.\n"
+            f"Введите дату не позднее сегодняшней ({today.strftime('%d.%m.%Y')}).",
+            reply_markup=cancel_kb(),
+        )
+        return
+
+    min_allowed = _months_ago(today, RECEIPT_MAX_AGE_MONTHS)
+    if parsed < min_allowed:
+        await message.answer(
+            f"⚠️ Дата чека слишком старая. Гарантию можно активировать только по чекам "
+            f"не старше {RECEIPT_MAX_AGE_MONTHS} месяцев "
+            f"(с {min_allowed.strftime('%d.%m.%Y')}).",
+            reply_markup=cancel_kb(),
+        )
+        return
+
     await state.update_data(receipt_date_wb=raw)
     user_data = await db.get_user(message.from_user.id)
     await start_next_registration_step(message, state, user_data)

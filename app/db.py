@@ -422,6 +422,26 @@ class Database:
             row = await cur.fetchone()
             return row[0] if row else 0
 
+    async def find_warranties_by_receipt(self, receipt_number: str, tg_id: int | None = None) -> list[dict[str, Any]]:
+        """Ищет гарантии по номеру чека (receipt_text). Если указан tg_id, ограничивает выборку этим пользователем."""
+        if not receipt_number or not str(receipt_number).strip():
+            return []
+        value = str(receipt_number).strip()
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            if tg_id is not None:
+                cur = await db.execute(
+                    "SELECT * FROM warranties WHERE receipt_text=? AND tg_id=?",
+                    (value, tg_id),
+                )
+            else:
+                cur = await db.execute(
+                    "SELECT * FROM warranties WHERE receipt_text=?",
+                    (value,),
+                )
+            rows = await cur.fetchall()
+            return [dict(row) for row in rows]
+
     async def get_unsynced_warranties(self) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row

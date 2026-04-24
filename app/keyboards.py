@@ -137,7 +137,7 @@ def warranties_selection_kb(warranties: list[dict]) -> InlineKeyboardMarkup:
                 callback_data=f"select_w:{w['id']}"
             )
         ])
-    rows.append([InlineKeyboardButton(text="Другой (через Чек/ЧЗ)", callback_data="select_w:other")])
+    rows.append([InlineKeyboardButton(text="Другое изделие", callback_data="select_w:other")])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
