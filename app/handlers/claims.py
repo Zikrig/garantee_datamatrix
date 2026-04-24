@@ -44,7 +44,7 @@ async def claim_start_handler(message: Message, state: FSMContext) -> None:
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🔐 Активировать гарантию 12 месяцев", callback_data="menu:warranty")],
-                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claim:site_start")],
+                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claimflow:site_start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
                 ]
             )
@@ -71,7 +71,7 @@ async def claim_start_callback_handler(callback: CallbackQuery, state: FSMContex
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [InlineKeyboardButton(text="🔐 Активировать гарантию 12 месяцев", callback_data="menu:warranty")],
-                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claim:site_start")],
+                    [InlineKeyboardButton(text="🌐 Гарантия с сайта (по номеру чека)", callback_data="claimflow:site_start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
                 ]
             )
@@ -158,8 +158,8 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     data = callback.data
     if data == "select_w:other":
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🧾 Ввести номер чека с сайта", callback_data="claim:site_start")],
-            [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claim:cz_start")],
+            [InlineKeyboardButton(text="🧾 Ввести номер чека с сайта", callback_data="claimflow:site_start")],
+            [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
             [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
         ])
         await callback.message.answer(
@@ -191,7 +191,7 @@ async def claim_warranty_selection_handler(callback: CallbackQuery, state: FSMCo
     await state.set_state(ClaimStates.description)
     await callback.message.answer("Опишите ситуацию текстом.", reply_markup=cancel_kb())
 
-@router.callback_query(F.data == "claim:cz_text_start")
+@router.callback_query(F.data == "claimflow:cz_text_start")
 async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ClaimStates.purchase_cz_text)
@@ -207,12 +207,12 @@ async def claim_cz_text_start_handler(callback: CallbackQuery, state: FSMContext
     )
 
 
-@router.callback_query(F.data == "claim:cz_start")
+@router.callback_query(F.data == "claimflow:cz_start")
 async def claim_cz_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ClaimStates.purchase_cz_photo)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+        [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
     ])
     await send_cached_photo(
@@ -226,7 +226,7 @@ async def claim_cz_start_handler(callback: CallbackQuery, state: FSMContext) -> 
     )
 
 
-@router.callback_query(F.data == "claim:site_start")
+@router.callback_query(F.data == "claimflow:site_start")
 async def claim_site_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(ClaimStates.purchase_site_receipt_number)
@@ -234,7 +234,7 @@ async def claim_site_start_handler(callback: CallbackQuery, state: FSMContext) -
         "Введите номер чека из регистрации на сайте:",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claim:cz_start")],
+                [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
                 [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
             ]
         ),
@@ -250,7 +250,7 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
 
     if not photo and not document:
         await message.answer("Нужна фотография бирки изделия или нажмите кнопку 'Отправить текстом'.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+            [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
             [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
         ]))
         return
@@ -302,7 +302,7 @@ async def claim_purchase_cz_photo_handler(message: Message, state: FSMContext) -
         await message.answer(
             error_text,
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claim:cz_text_start")],
+                [InlineKeyboardButton(text="⌨️ Отправить текстом", callback_data="claimflow:cz_text_start")],
                 [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
             ])
         )
@@ -358,7 +358,7 @@ async def claim_site_receipt_text_handler(message: Message, state: FSMContext) -
             "Проверьте номер и отправьте снова, либо используйте вариант через Честный Знак.",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claim:cz_start")],
+                    [InlineKeyboardButton(text="🏷 Через Честный Знак", callback_data="claimflow:cz_start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="cancel")],
                 ]
             ),
