@@ -8,6 +8,7 @@ class ClaimStates(StatesGroup):
     purchase_sku = State()
     purchase_receipt_file = State()
     purchase_receipt_text = State()
+    purchase_site_receipt_number = State()
     description = State()
     files = State()
     contact_name = State()

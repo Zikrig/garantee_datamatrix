@@ -229,7 +229,7 @@ async def claim_cz_start_handler(callback: CallbackQuery, state: FSMContext) -> 
 @router.callback_query(F.data == "claim:site_start")
 async def claim_site_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    await state.set_state(ClaimStates.purchase_receipt_text)
+    await state.set_state(ClaimStates.purchase_site_receipt_number)
     await callback.message.answer(
         "Введите номер чека из регистрации на сайте:",
         reply_markup=InlineKeyboardMarkup(
@@ -344,7 +344,7 @@ async def claim_purchase_cz_text_handler(message: Message, state: FSMContext) ->
     await start_next_claim_reg_step(message, state, user_data)
 
 
-@router.message(ClaimStates.purchase_receipt_text)
+@router.message(ClaimStates.purchase_site_receipt_number)
 async def claim_site_receipt_text_handler(message: Message, state: FSMContext) -> None:
     if not message.text or not message.text.strip():
         await message.answer("Пожалуйста, введите номер чека текстом.", reply_markup=cancel_kb())
