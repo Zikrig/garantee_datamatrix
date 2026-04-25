@@ -142,12 +142,14 @@ def warranties_selection_kb(warranties: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_menu_kb() -> InlineKeyboardMarkup:
+    from app.utils import PRIVACY_POLICY_URL
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📋 Все заявки", callback_data="admin:list_claims:all")],
             [InlineKeyboardButton(text="📨 Новые заявки", callback_data="admin:list_claims:new")],
             [InlineKeyboardButton(text="❓ Вопросы", callback_data="admin:faq")],
             [InlineKeyboardButton(text="📚 База знаний", callback_data="admin:kb_menu")],
+            [InlineKeyboardButton(text="🔐 Политика ПД", url=PRIVACY_POLICY_URL)],
             [InlineKeyboardButton(text="❌ Закрыть", callback_data="cancel")]
         ]
     )
@@ -197,4 +199,13 @@ def faq_suggestions_kb(matched: list[dict]) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="❌ Нет, отправить вопрос менеджеру", callback_data="faq:create_claim")])
     rows.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def privacy_consent_kb(policy_url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔐 Политика ПД", url=policy_url)],
+            [InlineKeyboardButton(text="✅ Ознакомлен(а) и согласен(на)", callback_data="privacy:accept")],
+        ]
+    )
 

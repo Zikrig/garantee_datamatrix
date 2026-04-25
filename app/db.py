@@ -23,6 +23,7 @@ class Database:
                     phone TEXT,
                     email TEXT,
                     thread_id INTEGER,
+                    consent_at TEXT,
                     created_at TEXT
                 );
 
@@ -98,6 +99,11 @@ class Database:
 
             try:
                 await db.execute("ALTER TABLE users ADD COLUMN email TEXT")
+            except aiosqlite.OperationalError:
+                pass # already exists
+
+            try:
+                await db.execute("ALTER TABLE users ADD COLUMN consent_at TEXT")
             except aiosqlite.OperationalError:
                 pass # already exists
 
@@ -192,6 +198,25 @@ class Database:
             cur = await db.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
             row = await cur.fetchone()
             return dict(row) if row else None
+
+    async def has_privacy_consent(self, tg_id: int) -> bool:
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute("SELECT consent_at FROM users WHERE tg_id=?", (tg_id,))
+            row = await cur.fetchone()
+            return bool(row and row[0])
+
+    async def set_privacy_consent(self, tg_id: int) -> None:
+        now = dt.datetime.utcnow().isoformat()
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO users (tg_id, consent_at, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(tg_id) DO UPDATE SET consent_at=excluded.consent_at
+                """,
+                (tg_id, now, now),
+            )
+            await db.commit()
 
     async def get_next_claim_number(self) -> int:
         """Get next claim number starting from 1"""

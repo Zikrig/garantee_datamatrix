@@ -7,8 +7,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from app.db import Database
-from app.utils import upsert_from_user, load_kb, DEFAULT_KB, get_ours_tokens, send_admin_claim
-from app.keyboards import main_menu_kb, cancel_kb, claims_list_kb, faq_suggestions_kb
+from app.utils import upsert_from_user, load_kb, DEFAULT_KB, get_ours_tokens, send_admin_claim, get_privacy_policy_url
+from app.keyboards import main_menu_kb, cancel_kb, claims_list_kb, faq_suggestions_kb, privacy_consent_kb
 from app.states import CheckZnackStates, FaqAskStates
 from app.constants import CARE_TEXT, TRUST_TEXT, FAQ_ITEMS
 
@@ -21,6 +21,15 @@ from app.database import db
 @router.message(CommandStart())
 async def start_handler(message: Message) -> None:
     await upsert_from_user(db, message.from_user)
+    has_consent = await db.has_privacy_consent(message.from_user.id)
+    if not has_consent:
+        policy_url = await get_privacy_policy_url(db)
+        await message.answer(
+            "Для доступа к функциям бота нужно согласиться с обработкой персональных данных.",
+            reply_markup=privacy_consent_kb(policy_url),
+        )
+        return
+
     has_warranty = await db.has_warranty(message.from_user.id)
     text = "Добро пожаловать! Выберите действие из меню."
     if not has_warranty:
@@ -33,6 +42,17 @@ async def start_handler(message: Message) -> None:
         text,
         reply_markup=main_menu_kb(),
         parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data == "privacy:accept")
+async def privacy_accept_handler(callback: CallbackQuery) -> None:
+    await upsert_from_user(db, callback.from_user)
+    await db.set_privacy_consent(callback.from_user.id)
+    await callback.answer("Согласие сохранено")
+    await callback.message.answer(
+        "Спасибо! Согласие сохранено, теперь можно пользоваться ботом.",
+        reply_markup=main_menu_kb(),
     )
 
 @router.message(Command("cancel"))

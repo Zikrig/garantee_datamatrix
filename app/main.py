@@ -8,6 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from app.database import db
 from app.handlers import common, admin, warranty, claims, kb_admin, faq_admin, communication, unexpected
+from app.privacy import PrivacyConsentMiddleware
 from app.sheets import sheets_sync_scheduler
 
 async def main() -> None:
@@ -29,6 +30,9 @@ async def main() -> None:
     session = AiohttpSession(timeout=20)
     bot = Bot(token=token, session=session)
     dp = Dispatcher(storage=MemoryStorage())
+    consent_middleware = PrivacyConsentMiddleware()
+    dp.message.middleware(consent_middleware)
+    dp.callback_query.middleware(consent_middleware)
 
     # Order matters for AIogram 3.x routers
     

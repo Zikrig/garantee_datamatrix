@@ -57,6 +57,7 @@ CERTS_URL = os.getenv("CERTS_URL", "https://ukataka.ru/blog")
 FAQ_URL = os.getenv("FAQ_URL", "https://ukataka.ru/kak-rabotaet-zaschita")
 TRUST_RESEARCH_URL = os.getenv("TRUST_RESEARCH_URL", "https://ukataka.ru/kak-rabotaet-zaschita")
 FABRIC_TEST_URL = os.getenv("FABRIC_TEST_URL", "https://ukataka.ru/blog/7byy9dn2k1-kak-mi-testiruem-tkan")
+PRIVACY_POLICY_URL = os.getenv("PRIVACY_POLICY_URL", "https://ukataka.ru/privacy")
 
 ADMIN_CHAT_IDS_RAW = os.getenv("ADMIN_CHAT_IDS", "")
 ADMIN_CHAT_IDS = [
@@ -105,6 +106,11 @@ def save_kb(data: dict):
 def get_ours_tokens() -> list[str]:
     ours_raw = os.getenv("OUR_CODES", "")
     return [item.strip() for item in ours_raw.replace(";", ",").split(",") if item.strip()]
+
+
+async def get_privacy_policy_url(db) -> str:
+    value = await db.get_setting("privacy_policy_url")
+    return value or PRIVACY_POLICY_URL
 
 
 def normalize_cz_code(raw: str) -> str:
