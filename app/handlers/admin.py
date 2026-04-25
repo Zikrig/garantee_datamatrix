@@ -7,7 +7,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 
 from app.database import db
 from app.keyboards import admin_menu_kb, claims_list_kb, claim_status_kb
-from app.utils import ADMIN_CHAT_IDS, get_or_create_user_thread
+from app.utils import ADMIN_CHAT_IDS, get_or_create_user_thread, get_privacy_policy_url
 from app.states import AdminStates
 from app.sheets import sync_to_sheets
 
@@ -105,6 +105,39 @@ async def admin_menu_callback_handler(callback: CallbackQuery) -> None:
         parse_mode="HTML"
     )
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin:privacy_url")
+async def admin_privacy_url_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    if not ADMIN_CHAT_IDS or callback.from_user.id not in ADMIN_CHAT_IDS:
+        await callback.answer("Недостаточно прав")
+        return
+
+    current_url = await get_privacy_policy_url(db)
+    await state.set_state(AdminStates.set_privacy_url)
+    await callback.message.answer(
+        f"Сейчас ссылка:\n{current_url}\n\nВведите новую ссылку",
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.set_privacy_url)
+async def admin_privacy_url_set_handler(message: Message, state: FSMContext) -> None:
+    if not ADMIN_CHAT_IDS or message.from_user.id not in ADMIN_CHAT_IDS:
+        return
+
+    new_url = (message.text or "").strip()
+    if not (new_url.startswith("http://") or new_url.startswith("https://")):
+        await message.answer("Введите корректную ссылку, начиная с http:// или https://")
+        return
+
+    await db.set_setting("privacy_policy_url", new_url)
+    await state.clear()
+    await message.answer(
+        f"✅ Ссылка обновлена:\n{new_url}",
+        reply_markup=admin_menu_kb(),
+    )
+
 
 @router.callback_query(F.data.startswith("status:"))
 async def status_callback_handler(callback: CallbackQuery) -> None:

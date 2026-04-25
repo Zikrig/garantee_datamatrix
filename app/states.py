@@ -16,6 +16,7 @@ class ClaimStates(StatesGroup):
 
 class AdminStates(StatesGroup):
     reply_text = State()
+    set_privacy_url = State()
     kb_edit_text = State()
     kb_edit_links = State()
     kb_add_link_label = State()
